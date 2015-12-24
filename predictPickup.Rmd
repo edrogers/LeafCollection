@@ -14,7 +14,16 @@ library(reshape2)
 leafData <- read.csv("mapStatuses.csv")
 leafData <- leafData[,-which(names(leafData) == "District")]
 leafData <- leafData %>% dcast(Time.Stamp ~ Area,value.var="Status")
-leafData <- leafData[!duplicated(leafData[-1]),]
+
+# Remove consecutive duplicate entries (ignoring differences in timestamp)
+
+#leafData <- leafData[!duplicated(leafData[-1]),] #This doesn't constrain itself to removing *consecutive* duplicates
+
+leafData[is.na(leafData)] <- "NA"
+leafData <- leafData[c(TRUE,rowMeans(tail(leafData[,-1],-1) != head(leafData[,-1],-1))>0),]
+leafData[leafData=="NA"] <- NA
+
+# Make the timestamp readable
 leafData$Time.Stamp <- as.POSIXct(leafData$Time.Stamp,
                                   origin = "1970-01-01",
                                   tz="America/Chicago")
