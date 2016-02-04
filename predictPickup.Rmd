@@ -11,7 +11,9 @@ Load libraries and import the data
 library(tidyr)
 library(dplyr)
 library(reshape2)
-leafData <- read.csv("mapStatuses.csv")
+library(FSA)
+library(lazyeval)
+leafData <- read.csv("~/Documents/LeafCollection/mapStatuses.csv")
 leafData <- leafData[,-which(names(leafData) == "District")]
 leafData <- leafData %>% dcast(Time.Stamp ~ Area,value.var="Status")
 
@@ -27,5 +29,55 @@ leafData[leafData=="NA"] <- NA
 leafData$Time.Stamp <- as.POSIXct(leafData$Time.Stamp,
                                   origin = "1970-01-01",
                                   tz="America/Chicago")
+
+# #Add a column for collection round
+# leafData$Area10_1_collectionRound = cumsum((leafData$Area10_1 != "Current") * (head(c("Current",leafData$Area10_1),-1) == "Current"))
+
+leafData <- leafData[,c("Area10_1","Area2_1","Area4_1")]
+
+# Add a column for collection round for each area
+leafDataZones <- names(leafData)
+leafDataNDaysNames <- names(leafData)
+leafDataZones <- setNames(leafDataZones,paste0("collectionRound_",leafDataZones))
+leafData <- leafData %>% 
+            mutate_each_(funs(cumsum((. != "Current") * (head(c("Current",.),-1) == "Current"))),leafDataZones) 
+
+# Group_by collection round then mutate a cumsum of "!= Current" to get "nDaysTilPickup"
+
+# The columns of data that aren't collection rounds
+leafStatus <- leafData[,-grep("^collectionRound",names(leafData))]
+
+leafDataNDaysNames <- setNames(leafDataNDaysNames,paste0("NDaysTilCollection_",leafDataNDaysNames))
+
+# _sd cols are just a kludge to deal with mutate_each issues
+leafData <- leafData %>%
+              mutate_each(funs(nDaysTilPickup=as.numeric(. != "Current"),sd=is.na),starts_with("Area"))
+leafData <- leafData %>%
+  select(-contains("_sd"))
+
+# # This line could do it one-at-a-time:
+# leafData <- leafData %>%
+#               group_by(collectionRound_Area10_1) %>%
+#               mutate(Area10_1_nDaysTilPickup = rcumsum(Area10_1_nDaysTilPickup)) %>%
+#               ungroup()
+
+leafDataNDaysCols <- leafData %>%
+                      select(ends_with("nDaysTilPickup"))
+leafDataNDaysCols <- names(leafDataNDaysCols)
+
+for (col in names(leafStatus))
+# for (col in c("Area10_1"))
+{
+  rnd <- paste0("collectionRound_",col)
+  ndays <- paste0(col,"_nDaysTilPickup")
+  print(c(rnd,ndays))
+  leafData <- leafData %>%
+                    group_by_(paste(rnd)) %>%
+                    mutate_(ndays=interp(~rcumsum(ndays),ndays=as.name(ndays))) %>%
+                    ungroup()
+  leafData[[ndays]]=leafData$ndays
+  leafData <- leafData %>% select(-ndays)
+}
+leafData <- leafData %>% select(-starts_with("collectionRound_"))
 
 ```
