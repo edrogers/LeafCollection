@@ -69,38 +69,133 @@ img {
 
 
 <p>Load libraries and import the data</p>
-<pre class="r"><code># library(tidyr)
+<pre class="r"><code>library(tidyr)
 library(dplyr)
 library(reshape2)
-leafData &lt;- read.csv(&quot;mapStatuses.csv&quot;)
+library(FSA)
+library(lazyeval)
+library(bizdays)
+library(timeDate)
+
+# Read in the data from the CSV. Data comes in very tall and narrow.
+# For each visit to the city's website, many observations are made
+# (one for each collection area in each district). 
+# dcast must be used to reshape the data
+
+leafData &lt;- read.csv(&quot;~/Documents/LeafCollection/mapStatuses.csv&quot;)
 leafData &lt;- leafData[,-which(names(leafData) == &quot;District&quot;)]
 leafData &lt;- leafData %&gt;% dcast(Time.Stamp ~ Area,value.var=&quot;Status&quot;)
 
-# Remove consecutive duplicate entries (ignoring differences in timestamp)
 
-#leafData &lt;- leafData[!duplicated(leafData[-1]),] #This doesn't constrain itself to removing *consecutive* duplicates
+# Remove consecutive duplicate entries (ignoring differences in timestamp)
+#  Done by using a slick hack with rowMeans and booleans. Essentially,
+#  the first row is demanded with c(TRUE,...), and all other rows are 
+#  compared to their subsequent neighbor (ignoring the first column)
+#  and if there are any differences between the neighbors, this row is
+#  also kept. Otherwise, it is dropped. To apply this trick, all NA 
+#  values must be temporarily switched out with &quot;NA&quot; placeholders, and
+#  reverted to NA values afterward.
 
 leafData[is.na(leafData)] &lt;- &quot;NA&quot;
 leafData &lt;- leafData[c(TRUE,rowMeans(tail(leafData[,-1],-1) != head(leafData[,-1],-1))&gt;0),]
 leafData[leafData==&quot;NA&quot;] &lt;- NA
+
 
 # Make the timestamp readable
 leafData$Time.Stamp &lt;- as.POSIXct(leafData$Time.Stamp,
                                   origin = &quot;1970-01-01&quot;,
                                   tz=&quot;America/Chicago&quot;)
 
-#This line creates a number of days til next &quot;Current&quot; is observed for each row
-nDaysTilPickup &lt;- apply(leafData, 2, function(x) which(x==&quot;Current&quot;)[1]-1)
 
-#Potential use: break data up:
-#  3-lines previous is training data
-#  nDaysTilPickup is vector of predicted values
-#
-#  Could train with 34 different training examples
-# (one example for each 3 consecutive rows)
+# Using the bizdays library, the number of business days between any two
+# rows in the data.frame can be computed.
+TimeStamps &lt;- leafData$Time.Stamp
+cal &lt;- Calendar(holidayNYSE(2015),weekdays = c(&quot;saturday&quot;,&quot;sunday&quot;))
+dates &lt;- data.frame(head(TimeStamps,-1))
+colnames(dates) &lt;- &quot;left&quot;
+dates$right &lt;- TimeStamps[-1]
+datePattern &lt;- &quot;^.*([0-9]{4,4}-[0-9]{2,2}-[0-9]{2,2}).*$&quot;
+dates$left &lt;- gsub(datePattern,&quot;\\1&quot;,dates[,&quot;left&quot;])
+dates$right&lt;- gsub(datePattern,&quot;\\1&quot;,dates[,&quot;right&quot;])
+dates &lt;- dates %&gt;% mutate(bizDiff = bizdays(left,right,cal))
 
-#Maybe a 666-input, 222-output neural network?
-#Maybe 222 separate random forests?</code></pre>
+# During testing, only examine a few select columns. 
+# Avoid messing with columns that have NA values for now.
+leafData &lt;- leafData[,c(&quot;Area10_1&quot;,&quot;Area2_1&quot;,&quot;Area4_1&quot;)]
+
+# Add a column for collection round for each area
+#  First, construct a list of names for these columns
+leafDataAreaNames            &lt;- names(leafData)
+leafDataCollectionRoundNames &lt;- names(leafData)
+leafDataCollectionRoundNames &lt;- setNames(leafDataCollectionRoundNames,paste0(&quot;collectionRound_&quot;,leafDataAreaNames))
+#  Then, fill these columns with a unique number for each round
+#  of collections. This is done by finding each time the status
+#  is not equal to &quot;Current&quot;, but followed by a &quot;Current&quot; in the
+#  next row.  Each time this happens a row is marked true. Then,
+#  a cumsum is taken over that column, which gives a column that
+#  is iterated if-and-only-if a new &quot;Current&quot; status occurs.
+leafData &lt;- leafData %&gt;% 
+            mutate_each_(funs(cumsum((. != &quot;Current&quot;) * (head(c(&quot;Current&quot;,.),-1) == &quot;Current&quot;))),leafDataCollectionRoundNames) 
+
+
+# Add a column of nBusinessDaysTilPickup for each Area
+#  First, construct a list of names for each column
+leafDataNDaysNames           &lt;- names(leafData)
+leafDataNDaysNames &lt;- setNames(leafDataNDaysNames,paste0(&quot;NDaysTilCollection_&quot;,leafDataAreaNames))
+
+#  Then, throw in our pre-computed column of 
+#  nBusinessDaysTilNextEntry as a new column
+leafData$BusinessDaysTilNextEntry &lt;- c(dates[,&quot;bizDiff&quot;],0)
+
+#  Next, use mutate_each() to copy the nBizDays column once for
+#  each area, but zero-ing out the value if the area is &quot;Current&quot;
+#   (A dummy function must be used in addition just to get 
+#   mutate_each to behave. This set of columns, &quot;..._sd&quot; is
+#   immediately discarded)
+leafData &lt;- leafData %&gt;%
+              mutate_each(funs(nBusinessDaysTilPickup=(as.numeric(. != &quot;Current&quot;)*BusinessDaysTilNextEntry),sd=is.na),starts_with(&quot;Area&quot;))
+leafData &lt;- leafData %&gt;%
+  select(-contains(&quot;_sd&quot;))
+
+# Next, using collectionRound_ for each Area as a grouping
+# variable, perform a cumsum on nBusinessDaysTilPickup
+
+for (col in leafDataAreaNames)
+{
+  rnd &lt;- paste0(&quot;collectionRound_&quot;,col)
+  ndays &lt;- paste0(col,&quot;_nBusinessDaysTilPickup&quot;)
+  leafData &lt;- leafData %&gt;%
+                    group_by_(paste(rnd)) %&gt;%
+                    mutate_(ndays=interp(~rcumsum(ndays),ndays=as.name(ndays))) %&gt;%
+                    ungroup()
+  leafData[[ndays]]=leafData$ndays
+  leafData &lt;- leafData %&gt;% select(-ndays)
+}
+
+# Lastly, cleanup the data.frame by removing the grouping variable
+# and row-by-row nBizDays computations.
+leafData &lt;- leafData %&gt;% 
+  select(-starts_with(&quot;collectionRound_&quot;)) %&gt;%
+  select(-starts_with(&quot;BusinessDaysTilNextEntry&quot;))
+
+leafData</code></pre>
+<pre><code>## Source: local data frame [37 x 6]
+## 
+##    Area10_1 Area2_1 Area4_1 Area10_1_nBusinessDaysTilPickup
+##       (chr)   (chr)   (chr)                           (dbl)
+## 1   Current    Done    Done                               0
+## 2      Done    Done    Done                              11
+## 3      Done Current    Next                              10
+## 4      Done Current    Next                               9
+## 5      Done    Done    Next                               8
+## 6      Done    Done    Next                               7
+## 7      Done    Done Current                               6
+## 8      Done    Done    Done                               5
+## 9      Done    Done    Done                               4
+## 10     Done    Done    Done                               3
+## ..      ...     ...     ...                             ...
+## Variables not shown: Area2_1_nBusinessDaysTilPickup (dbl),
+##   Area4_1_nBusinessDaysTilPickup (dbl)</code></pre>
 
 
 </div>

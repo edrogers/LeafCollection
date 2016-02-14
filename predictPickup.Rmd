@@ -15,26 +15,40 @@ library(FSA)
 library(lazyeval)
 library(bizdays)
 library(timeDate)
+
+# Read in the data from the CSV. Data comes in very tall and narrow.
+# For each visit to the city's website, many observations are made
+# (one for each collection area in each district). 
+# dcast must be used to reshape the data
+
 leafData <- read.csv("~/Documents/LeafCollection/mapStatuses.csv")
 leafData <- leafData[,-which(names(leafData) == "District")]
 leafData <- leafData %>% dcast(Time.Stamp ~ Area,value.var="Status")
 
-# Remove consecutive duplicate entries (ignoring differences in timestamp)
 
-#leafData <- leafData[!duplicated(leafData[-1]),] #This doesn't constrain itself to removing *consecutive* duplicates
+# Remove consecutive duplicate entries (ignoring differences in timestamp)
+#  Done by using a slick hack with rowMeans and booleans. Essentially,
+#  the first row is demanded with c(TRUE,...), and all other rows are 
+#  compared to their subsequent neighbor (ignoring the first column)
+#  and if there are any differences between the neighbors, this row is
+#  also kept. Otherwise, it is dropped. To apply this trick, all NA 
+#  values must be temporarily switched out with "NA" placeholders, and
+#  reverted to NA values afterward.
 
 leafData[is.na(leafData)] <- "NA"
 leafData <- leafData[c(TRUE,rowMeans(tail(leafData[,-1],-1) != head(leafData[,-1],-1))>0),]
 leafData[leafData=="NA"] <- NA
+
 
 # Make the timestamp readable
 leafData$Time.Stamp <- as.POSIXct(leafData$Time.Stamp,
                                   origin = "1970-01-01",
                                   tz="America/Chicago")
 
+
+# Using the bizdays library, the number of business days between any two
+# rows in the data.frame can be computed.
 TimeStamps <- leafData$Time.Stamp
-# data(holidaysANBIMA)
-# cal <- Calendar(holidaysANBIMA, weekdays=c("saturday", "sunday"))
 cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
 dates <- data.frame(head(TimeStamps,-1))
 colnames(dates) <- "left"
@@ -43,53 +57,52 @@ datePattern <- "^.*([0-9]{4,4}-[0-9]{2,2}-[0-9]{2,2}).*$"
 dates$left <- gsub(datePattern,"\\1",dates[,"left"])
 dates$right<- gsub(datePattern,"\\1",dates[,"right"])
 dates <- dates %>% mutate(bizDiff = bizdays(left,right,cal))
-# 
-# BusinessDays <- bizdays(head(TimeStamps,-1),TimeStamps[-1],cal)
-dTS <- data.frame(TimeStamps)
-dTS$BusinessDaysTilNextEntry <- c(dates[,"bizDiff"],0)
 
-# #Add a column for collection round
-# leafData$Area10_1_collectionRound = cumsum((leafData$Area10_1 != "Current") * (head(c("Current",leafData$Area10_1),-1) == "Current"))
-
+# During testing, only examine a few select columns. 
+# Avoid messing with columns that have NA values for now.
 leafData <- leafData[,c("Area10_1","Area2_1","Area4_1")]
 
 # Add a column for collection round for each area
-leafDataZones <- names(leafData)
-leafDataNDaysNames <- names(leafData)
-leafDataZones <- setNames(leafDataZones,paste0("collectionRound_",leafDataZones))
+#  First, construct a list of names for these columns
+leafDataAreaNames            <- names(leafData)
+leafDataCollectionRoundNames <- names(leafData)
+leafDataCollectionRoundNames <- setNames(leafDataCollectionRoundNames,paste0("collectionRound_",leafDataAreaNames))
+#  Then, fill these columns with a unique number for each round
+#  of collections. This is done by finding each time the status
+#  is not equal to "Current", but followed by a "Current" in the
+#  next row.  Each time this happens a row is marked true. Then,
+#  a cumsum is taken over that column, which gives a column that
+#  is iterated if-and-only-if a new "Current" status occurs.
 leafData <- leafData %>% 
-            mutate_each_(funs(cumsum((. != "Current") * (head(c("Current",.),-1) == "Current"))),leafDataZones) 
+            mutate_each_(funs(cumsum((. != "Current") * (head(c("Current",.),-1) == "Current"))),leafDataCollectionRoundNames) 
 
-# Group_by collection round then mutate a cumsum of "!= Current" to get "nDaysTilPickup"
 
-# The columns of data that aren't collection rounds
-leafStatus <- leafData[,-grep("^collectionRound",names(leafData))]
+# Add a column of nBusinessDaysTilPickup for each Area
+#  First, construct a list of names for each column
+leafDataNDaysNames           <- names(leafData)
+leafDataNDaysNames <- setNames(leafDataNDaysNames,paste0("NDaysTilCollection_",leafDataAreaNames))
 
-leafDataNDaysNames <- setNames(leafDataNDaysNames,paste0("NDaysTilCollection_",leafDataNDaysNames))
+#  Then, throw in our pre-computed column of 
+#  nBusinessDaysTilNextEntry as a new column
+leafData$BusinessDaysTilNextEntry <- c(dates[,"bizDiff"],0)
 
-# _sd cols are just a kludge to deal with mutate_each issues
-leafData$BusinessDaysTilNextEntry <- dTS$BusinessDaysTilNextEntry
+#  Next, use mutate_each() to copy the nBizDays column once for
+#  each area, but zero-ing out the value if the area is "Current"
+#   (A dummy function must be used in addition just to get 
+#   mutate_each to behave. This set of columns, "..._sd" is
+#   immediately discarded)
 leafData <- leafData %>%
               mutate_each(funs(nBusinessDaysTilPickup=(as.numeric(. != "Current")*BusinessDaysTilNextEntry),sd=is.na),starts_with("Area"))
 leafData <- leafData %>%
   select(-contains("_sd"))
 
-# # This line could do it one-at-a-time:
-# leafData <- leafData %>%
-#               group_by(collectionRound_Area10_1) %>%
-#               mutate(Area10_1_nDaysTilPickup = rcumsum(Area10_1_nDaysTilPickup)) %>%
-#               ungroup()
+# Next, using collectionRound_ for each Area as a grouping
+# variable, perform a cumsum on nBusinessDaysTilPickup
 
-leafDataNDaysCols <- leafData %>%
-                      select(ends_with("nBusinessDaysTilPickup"))
-leafDataNDaysCols <- names(leafDataNDaysCols)
-
-for (col in names(leafStatus))
-# for (col in c("Area10_1"))
+for (col in leafDataAreaNames)
 {
   rnd <- paste0("collectionRound_",col)
   ndays <- paste0(col,"_nBusinessDaysTilPickup")
-  print(c(rnd,ndays))
   leafData <- leafData %>%
                     group_by_(paste(rnd)) %>%
                     mutate_(ndays=interp(~rcumsum(ndays),ndays=as.name(ndays))) %>%
@@ -97,8 +110,12 @@ for (col in names(leafStatus))
   leafData[[ndays]]=leafData$ndays
   leafData <- leafData %>% select(-ndays)
 }
+
+# Lastly, cleanup the data.frame by removing the grouping variable
+# and row-by-row nBizDays computations.
 leafData <- leafData %>% 
   select(-starts_with("collectionRound_")) %>%
   select(-starts_with("BusinessDaysTilNextEntry"))
 
+leafData
 ```
