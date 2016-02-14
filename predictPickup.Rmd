@@ -37,7 +37,6 @@ leafData <- leafData %>% dcast(Time.Stamp ~ Area,value.var="Status")
 
 leafData[is.na(leafData)] <- "NA"
 leafData <- leafData[c(TRUE,rowMeans(tail(leafData[,-1],-1) != head(leafData[,-1],-1))>0),]
-leafData[leafData=="NA"] <- NA
 
 
 # Make the timestamp readable
@@ -58,10 +57,10 @@ dates$left <- gsub(datePattern,"\\1",dates[,"left"])
 dates$right<- gsub(datePattern,"\\1",dates[,"right"])
 dates <- dates %>% mutate(bizDiff = bizdays(left,right,cal))
 
-# During testing, only examine a few select columns. 
-# Avoid messing with columns that have NA values for now.
-leafData <- leafData[,c("Area10_1","Area2_1","Area4_1")]
-
+# # During testing, only examine a few select columns. 
+# # Avoid messing with columns that have NA values for now.
+# leafData <- leafData[,c("Area10_1","Area1_1","Area4_1")]
+leafData <- leafData[,-which(colnames(leafData) == "Time.Stamp")]
 # Add a column for collection round for each area
 #  First, construct a list of names for these columns
 leafDataAreaNames            <- names(leafData)
@@ -112,10 +111,13 @@ for (col in leafDataAreaNames)
 }
 
 # Lastly, cleanup the data.frame by removing the grouping variable
-# and row-by-row nBizDays computations.
+# and row-by-row nBizDays computations. Reintroduce the TimeStamp.
 leafData <- leafData %>% 
   select(-starts_with("collectionRound_")) %>%
   select(-starts_with("BusinessDaysTilNextEntry"))
+leafDataNames <- names(leafData)
+leafData[leafData=="NA"] <- NA
+leafData <- cbind(TimeStamps,leafData)
 
 leafData
 ```
