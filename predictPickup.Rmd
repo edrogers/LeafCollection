@@ -14,6 +14,7 @@ library(reshape2)
 library(FSA)
 library(lazyeval)
 library(bizdays)
+library(timeDate)
 leafData <- read.csv("~/Documents/LeafCollection/mapStatuses.csv")
 leafData <- leafData[,-which(names(leafData) == "District")]
 leafData <- leafData %>% dcast(Time.Stamp ~ Area,value.var="Status")
@@ -32,9 +33,12 @@ leafData$Time.Stamp <- as.POSIXct(leafData$Time.Stamp,
                                   tz="America/Chicago")
 
 TimeStamps <- leafData$Time.Stamp
-data(holidaysANBIMA)
-cal <- Calendar(holidaysANBIMA, weekdays=c("saturday", "sunday"))
+# data(holidaysANBIMA)
+# cal <- Calendar(holidaysANBIMA, weekdays=c("saturday", "sunday"))
+cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
 BusinessDays <- bizdays(head(TimeStamps,-1),TimeStamps[-1],cal)
+dTS <- data.frame(TimeStamps)
+dTS$BusinessDays <- c(BusinessDays,0)
 
 # #Add a column for collection round
 # leafData$Area10_1_collectionRound = cumsum((leafData$Area10_1 != "Current") * (head(c("Current",leafData$Area10_1),-1) == "Current"))
