@@ -68,8 +68,9 @@ leafStatus <- leafData[,-grep("^collectionRound",names(leafData))]
 leafDataNDaysNames <- setNames(leafDataNDaysNames,paste0("NDaysTilCollection_",leafDataNDaysNames))
 
 # _sd cols are just a kludge to deal with mutate_each issues
+leafData$BusinessDaysTilNextEntry <- dTS$BusinessDaysTilNextEntry
 leafData <- leafData %>%
-              mutate_each(funs(nDaysTilPickup=as.numeric(. != "Current"),sd=is.na),starts_with("Area"))
+              mutate_each(funs(nBusinessDaysTilPickup=(as.numeric(. != "Current")*BusinessDaysTilNextEntry),sd=is.na),starts_with("Area"))
 leafData <- leafData %>%
   select(-contains("_sd"))
 
@@ -80,14 +81,14 @@ leafData <- leafData %>%
 #               ungroup()
 
 leafDataNDaysCols <- leafData %>%
-                      select(ends_with("nDaysTilPickup"))
+                      select(ends_with("nBusinessDaysTilPickup"))
 leafDataNDaysCols <- names(leafDataNDaysCols)
 
 for (col in names(leafStatus))
 # for (col in c("Area10_1"))
 {
   rnd <- paste0("collectionRound_",col)
-  ndays <- paste0(col,"_nDaysTilPickup")
+  ndays <- paste0(col,"_nBusinessDaysTilPickup")
   print(c(rnd,ndays))
   leafData <- leafData %>%
                     group_by_(paste(rnd)) %>%
@@ -96,6 +97,8 @@ for (col in names(leafStatus))
   leafData[[ndays]]=leafData$ndays
   leafData <- leafData %>% select(-ndays)
 }
-leafData <- leafData %>% select(-starts_with("collectionRound_"))
+leafData <- leafData %>% 
+  select(-starts_with("collectionRound_")) %>%
+  select(-starts_with("BusinessDaysTilNextEntry"))
 
 ```
