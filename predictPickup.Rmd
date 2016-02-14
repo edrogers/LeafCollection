@@ -36,9 +36,17 @@ TimeStamps <- leafData$Time.Stamp
 # data(holidaysANBIMA)
 # cal <- Calendar(holidaysANBIMA, weekdays=c("saturday", "sunday"))
 cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
-BusinessDays <- bizdays(head(TimeStamps,-1),TimeStamps[-1],cal)
+dates <- data.frame(head(TimeStamps,-1))
+colnames(dates) <- "left"
+dates$right <- TimeStamps[-1]
+datePattern <- "^.*([0-9]{4,4}-[0-9]{2,2}-[0-9]{2,2}).*$"
+dates$left <- gsub(datePattern,"\\1",dates[,"left"])
+dates$right<- gsub(datePattern,"\\1",dates[,"right"])
+dates <- dates %>% mutate(bizDiff = bizdays(left,right,cal))
+# 
+# BusinessDays <- bizdays(head(TimeStamps,-1),TimeStamps[-1],cal)
 dTS <- data.frame(TimeStamps)
-dTS$BusinessDays <- c(BusinessDays,0)
+dTS$BusinessDaysTilNextEntry <- c(dates[,"bizDiff"],0)
 
 # #Add a column for collection round
 # leafData$Area10_1_collectionRound = cumsum((leafData$Area10_1 != "Current") * (head(c("Current",leafData$Area10_1),-1) == "Current"))
