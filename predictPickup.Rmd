@@ -119,5 +119,37 @@ leafDataNames <- names(leafData)
 leafData[leafData=="NA"] <- NA
 leafData <- cbind(TimeStamps,leafData)
 
-leafData
 ```
+
+Something to consider: change all area names from AreaX_Y to AreaXX_YYY
+
+```{r trainDecisionTree, message=FALSE, warning=FALSE}
+library(rpart)
+
+#First, let's just try to figure out Area10_1 based on the last 17 rows of data
+
+
+leafData_subset <- leafData %>%
+  select(-ends_with("Pickup")) %>%
+  select(-starts_with("Time"))
+leafData_subset <- leafData_subset[c(21:37),]
+leafData_subset$n <- leafData[c(21:37),"Area10_1_nBusinessDaysTilPickup"]
+#leafData_subset
+
+fit <- rpart(n ~ ., data=leafData_subset, minsplit=2)
+par(mfrow = c(1,2), xpd = NA) # otherwise on some devices the text is clipped
+plot(fit)
+text(fit, use.n = TRUE)
+
+```
+
+A thought: compress the dataset before training like so:
+
+To train on Area10_5 reduce data.frame down to
+Statuses of all areas in District 10
+Statuses of all areas in District 8 (the "previous" district)
+True/False factor: Does District 6 have a "Current" Area?
+True/False factor: Does District 4 have a "Current" Area?
+True/False factor: Does District 2 have a "Current" Area?
+
+This should reduce training from 221 inputs to ~47.
