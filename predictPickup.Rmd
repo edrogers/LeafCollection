@@ -121,7 +121,73 @@ leafData <- cbind(TimeStamps,leafData)
 
 ```
 
-Something to consider: change all area names from AreaX_Y to AreaXX_YYY
+```{r buildArea10Predictor, message=FALSE,warning=FALSE}
+#First, look only at even numbered districts
+leafDataWest <- leafData %>%
+  select(-starts_with("Area01")) %>%
+  select(-starts_with("Area03")) %>%
+  select(-starts_with("Area05")) %>%
+  select(-starts_with("Area07")) %>%
+  select(-starts_with("Area09"))
+
+# Now, build summary columns for each area
+areaStatus <- function(num,df) 
+{
+  out <- rep("Done",nrow(df))
+  out[rowSums(df %>% select(starts_with(paste("Area",num,sep = ""))) == "Not Done") > 0] <- "Not Done"
+  out[rowSums(df %>% select(starts_with(paste("Area",num,sep = ""))) == "Next") > 0] <- "Next"
+  out[rowSums(df %>% select(starts_with(paste("Area",num,sep = ""))) == "Current") > 0] <- "Current"
+  out
+}
+
+leafDataWest$Area02Status <- areaStatus("02",leafDataWest)
+leafDataWest$Area04Status <- areaStatus("04",leafDataWest)
+leafDataWest$Area06Status <- areaStatus("06",leafDataWest)
+leafDataWest$Area08Status <- areaStatus("08",leafDataWest)
+leafDataWest$Area10Status <- areaStatus("10",leafDataWest)
+
+# Select only columns useful for regression: 
+#  dependent variable: my particular nBusinessDays column for this regression
+#  independent vars: All status columns in this district +
+#                    all status columns in the previous district +
+#                    summary status columns for other 3 districts
+dependent_var <- leafDataWest[,"Area10_001_nBusinessDaysTilPickup"]
+leafData10_001 <- leafDataWest %>%
+  select(-matches('Area02_+')) %>%
+  select(-matches("Area04_+")) %>%
+  select(-matches("Area06_+")) %>%
+  select(-matches("Area08Status")) %>%
+  select(-matches("Area10Status")) %>%
+  select(-matches("TimeStamps")) %>%
+  select(-ends_with("Pickup"))
+leafData10_001[] <- lapply(leafData10_001, factor)
+leafData10_001$nDays <- dependent_var
+
+# fit <- lm(nDays ~ .,data=leafData10_001)
+# 
+# testRow <- leafData10_001[c(18,22),] %>% select(-matches("nDays"))
+# testRow$Area10_023 <- leafData10_001[c(15,3),"Area10_023"]
+# testRow$Area08_001 <- leafData10_001[c(4,20),"Area08_001"]
+# predict.lm(fit,testRow)
+# leafData10_001[c(18,22),"nDays"]
+
+dependent_var <- leafDataWest[,"Area10_001_nBusinessDaysTilPickup"]
+leafData10_001 <- leafDataWest %>% select(ends_with("Status"))
+leafData10_001[] <- lapply(leafData10_001, factor)
+leafData10_001$nDays <- dependent_var
+
+fit <- lm(nDays ~ .,data=leafData10_001)
+
+testRow <- leafData10_001[c(18,24),] %>% select(-matches("nDays"))
+testRow$Area04Status <- leafData10_001[c(19,27),"Area04Status"]
+testRow$Area06Status <- leafData10_001[c(18,25),"Area06Status"]
+rownames(testRow) <- c("A","B")
+summary(fit)
+predict.lm(fit,testRow)
+leafData10_001[c(18,22),"nDays"]
+
+```
+
 
 ```{r trainDecisionTree, message=FALSE, warning=FALSE}
 library(rpart)
@@ -133,7 +199,7 @@ leafData_subset <- leafData %>%
   select(-ends_with("Pickup")) %>%
   select(-starts_with("Time"))
 leafData_subset <- leafData_subset[c(21:37),]
-leafData_subset$n <- leafData[c(21:37),"Area10_1_nBusinessDaysTilPickup"]
+leafData_subset$n <- leafData[c(21:37),"Area10_001_nBusinessDaysTilPickup"]
 #leafData_subset
 
 fit <- rpart(n ~ ., data=leafData_subset, minsplit=2)
