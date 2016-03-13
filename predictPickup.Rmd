@@ -15,6 +15,7 @@ library(FSA)
 library(lazyeval)
 library(bizdays)
 library(timeDate)
+library(ggplot2)
 
 # Read in the data from the CSV. Data comes in very tall and narrow.
 # For each visit to the city's website, many observations are made
@@ -185,11 +186,52 @@ rownames(testRow) <- c("A","B")
 summary(fit)
 predict.lm(fit,testRow)
 leafData10_001[c(18,22),"nDays"]
+```
+
+```{r alternatePredictor, message=FALSE, warning=FALSE}
+# Select only the columns for Area Statuses
+leafDataWestStatuses <- leafDataWest %>%
+  select(matches("Area[0-9]+_[0-9]+$"))
+
+# Choose an area of interest
+targetArea <- "Area10_001"
+# Assign dependent variable to a vector
+targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
+nDaysTilPickup <- leafDataWest[,targetAreaValName]
+
+# Drop any rows that lack "Current" status
+rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
+nDaysTilPickup <- nDaysTilPickup[rowsWithCurrent]
+leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
+
+# Rearrange data.frame so that target area is last column
+#  Column order is otherwise unchanged. ("Cut the deck")
+targetAreaCol <- which(colnames(leafDataWestStatuses) %in% targetArea)
+nextColNum <- (targetAreaCol)%%ncol(leafDataWestStatuses)+1
+lastColNum <- ncol(leafDataWestStatuses)
+if (targetAreaCol != lastColNum) {
+  leafDataWestStatuses <- leafDataWestStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
+}
+
+# Find column number of last "Current" status
+testFunc <- function(x) tail(colnames(leafDataWestStatuses)[x=="Current"],1)
+out <- apply(leafDataWestStatuses,1,testFunc)
+nColsFromCurrent <- match(out,colnames(leafDataWestStatuses))
+
+# Build a data.frame with independent & dependent variables
+modelData <- data.frame(nColsFromCurrent,nDaysTilPickup)
+
+# Make a regression from my 2 vars
+fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
+
+ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
+geom_point() +
+stat_smooth(method="lm",col="blue")
 
 ```
 
 
-```{r trainDecisionTree, message=FALSE, warning=FALSE}
+```{r trainDecisionTree, message=FALSE, warning=FALSE, eval=FALSE}
 library(rpart)
 
 #First, let's just try to figure out Area10_1 based on the last 17 rows of data
