@@ -111,6 +111,8 @@ for (col in leafDataAreaNames)
   leafData <- leafData %>% select(-ndays)
 }
 
+leafDataCollectionRounds <- leafData %>% select(starts_with("collectionRound_"))
+
 # Lastly, cleanup the data.frame by removing the grouping variable
 # and row-by-row nBizDays computations. Reintroduce the TimeStamp.
 leafData <- leafData %>% 
@@ -184,7 +186,7 @@ testRow$Area04Status <- leafData10_001[c(19,27),"Area04Status"]
 testRow$Area06Status <- leafData10_001[c(18,25),"Area06Status"]
 rownames(testRow) <- c("A","B")
 summary(fit)
-predict.lm(fit,testRow)
+#predict.lm(fit,testRow)
 leafData10_001[c(18,22),"nDays"]
 ```
 
@@ -194,15 +196,20 @@ leafDataWestStatuses <- leafDataWest %>%
   select(matches("Area[0-9]+_[0-9]+$"))
 
 # Choose an area of interest
-targetArea <- "Area10_001"
+targetArea <- "Area02_026"
+# targetArea <- "Area04_004"
+# targetArea <- "Area08_001"
 # Assign dependent variable to a vector
 targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
 nDaysTilPickup <- leafDataWest[,targetAreaValName]
+
+collectionRound <- leafDataCollectionRounds[,paste("collectionRound_",targetArea,sep="")]
 
 # Drop any rows that lack "Current" status
 rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
 nDaysTilPickup <- nDaysTilPickup[rowsWithCurrent]
 leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
+collectionRound <- collectionRound[rowsWithCurrent,]
 
 # Rearrange data.frame so that target area is last column
 #  Column order is otherwise unchanged. ("Cut the deck")
@@ -219,13 +226,31 @@ out <- apply(leafDataWestStatuses,1,testFunc)
 nColsFromCurrent <- match(out,colnames(leafDataWestStatuses))
 
 # Build a data.frame with independent & dependent variables
-modelData <- data.frame(nColsFromCurrent,nDaysTilPickup)
-
+modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 # Make a regression from my 2 vars
 fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
 
+# Create a feature that indicates (True/False) whether a "Current" status
+#   was observed in the last three rows.
+status <- leafDataWestStatuses[,targetArea]
+recentPickup <- status=="Current" | c("Done",head(status,-1))=="Current" | c("Done","Done",head(status,-2))=="Current"
+recentPickupAndDone <- as.factor(recentPickup & status=="Done")
+
+modelData$status <- as.factor(status)
+modelData$status <- relevel(modelData$status,ref="Done")
+modelData$recentPickupAndDone <- recentPickupAndDone
+
+# Mask out data from after last pickup (nDaysTilPickup is artificially small)
+afterLastPickup <- rcumsum(as.numeric(status=="Current"))==0
+modelData <- modelData[!afterLastPickup,]
+
+fit2 <- lm(nDaysTilPickup ~ ., data=modelData)
+
+# modelData$collectionRound <- as.factor(collectionRound[[1]])
+# fit2 <- lm(nDaysTilPickup ~ ., data=modelData)
+
 ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
-geom_point() +
+geom_jitter(aes(colour=factor(recentPickupAndDone)),size=3) +
 stat_smooth(method="lm",col="blue")
 
 ```
