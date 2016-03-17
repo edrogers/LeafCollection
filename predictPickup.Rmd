@@ -45,10 +45,12 @@ leafData$Time.Stamp <- as.POSIXct(leafData$Time.Stamp,
                                   origin = "1970-01-01",
                                   tz="America/Chicago")
 
+# Sequester the Time.Stamp column temporarily
+TimeStamps <- leafData$Time.Stamp
+leafData <- leafData[,-which(colnames(leafData) == "Time.Stamp")]
 
 # Using the bizdays library, the number of business days between any two
 # rows in the data.frame can be computed.
-TimeStamps <- leafData$Time.Stamp
 cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
 dates <- data.frame(head(TimeStamps,-1))
 colnames(dates) <- "left"
@@ -58,10 +60,6 @@ dates$left <- gsub(datePattern,"\\1",dates[,"left"])
 dates$right<- gsub(datePattern,"\\1",dates[,"right"])
 dates <- dates %>% mutate(bizDiff = bizdays(left,right,cal))
 
-# # During testing, only examine a few select columns. 
-# # Avoid messing with columns that have NA values for now.
-# leafData <- leafData[,c("Area10_1","Area1_1","Area4_1")]
-leafData <- leafData[,-which(colnames(leafData) == "Time.Stamp")]
 # Add a column for collection round for each area
 #  First, construct a list of names for these columns
 leafDataAreaNames            <- names(leafData)
@@ -82,8 +80,8 @@ leafData <- leafData %>%
 leafDataNDaysNames           <- names(leafData)
 leafDataNDaysNames <- setNames(leafDataNDaysNames,paste0("NDaysTilCollection_",leafDataAreaNames))
 
-#  Then, throw in our pre-computed column of 
-#  nBusinessDaysTilNextEntry as a new column
+#  Then, throw in our vector of how many business
+#   days between each row as a new column
 leafData$BusinessDaysTilNextEntry <- c(dates[,"bizDiff"],0)
 
 #  Next, use mutate_each() to copy the nBizDays column once for
@@ -113,6 +111,12 @@ for (col in leafDataAreaNames)
 
 leafDataCollectionRounds <- leafData %>% select(starts_with("collectionRound_"))
 
+# Add a new category, "Recently Done", that fills two rows after any
+#  "Current" status is observed.
+firstTwoEntriesAfterCurrent <- (rbind("Done",head(leafData,-1))=="Current" | rbind("Done","Done",head(leafData,-2))=="Current") & leafData!="Current"
+leafData[firstTwoEntriesAfterCurrent] <- "Recently Done"
+
+
 # Lastly, cleanup the data.frame by removing the grouping variable
 # and row-by-row nBizDays computations. Reintroduce the TimeStamp.
 leafData <- leafData %>% 
@@ -124,8 +128,8 @@ leafData <- cbind(TimeStamps,leafData)
 
 ```
 
-```{r buildArea10Predictor, message=FALSE,warning=FALSE}
-#First, look only at even numbered districts
+```{r buildWestPredictor, message=FALSE,warning=FALSE}
+#First, look only at western (even numbered) districts
 leafDataWest <- leafData %>%
   select(-starts_with("Area01")) %>%
   select(-starts_with("Area03")) %>%
@@ -133,64 +137,6 @@ leafDataWest <- leafData %>%
   select(-starts_with("Area07")) %>%
   select(-starts_with("Area09"))
 
-# Now, build summary columns for each area
-areaStatus <- function(num,df) 
-{
-  out <- rep("Done",nrow(df))
-  out[rowSums(df %>% select(starts_with(paste("Area",num,sep = ""))) == "Not Done") > 0] <- "Not Done"
-  out[rowSums(df %>% select(starts_with(paste("Area",num,sep = ""))) == "Next") > 0] <- "Next"
-  out[rowSums(df %>% select(starts_with(paste("Area",num,sep = ""))) == "Current") > 0] <- "Current"
-  out
-}
-
-leafDataWest$Area02Status <- areaStatus("02",leafDataWest)
-leafDataWest$Area04Status <- areaStatus("04",leafDataWest)
-leafDataWest$Area06Status <- areaStatus("06",leafDataWest)
-leafDataWest$Area08Status <- areaStatus("08",leafDataWest)
-leafDataWest$Area10Status <- areaStatus("10",leafDataWest)
-
-# Select only columns useful for regression: 
-#  dependent variable: my particular nBusinessDays column for this regression
-#  independent vars: All status columns in this district +
-#                    all status columns in the previous district +
-#                    summary status columns for other 3 districts
-dependent_var <- leafDataWest[,"Area10_001_nBusinessDaysTilPickup"]
-leafData10_001 <- leafDataWest %>%
-  select(-matches('Area02_+')) %>%
-  select(-matches("Area04_+")) %>%
-  select(-matches("Area06_+")) %>%
-  select(-matches("Area08Status")) %>%
-  select(-matches("Area10Status")) %>%
-  select(-matches("TimeStamps")) %>%
-  select(-ends_with("Pickup"))
-leafData10_001[] <- lapply(leafData10_001, factor)
-leafData10_001$nDays <- dependent_var
-
-# fit <- lm(nDays ~ .,data=leafData10_001)
-# 
-# testRow <- leafData10_001[c(18,22),] %>% select(-matches("nDays"))
-# testRow$Area10_023 <- leafData10_001[c(15,3),"Area10_023"]
-# testRow$Area08_001 <- leafData10_001[c(4,20),"Area08_001"]
-# predict.lm(fit,testRow)
-# leafData10_001[c(18,22),"nDays"]
-
-dependent_var <- leafDataWest[,"Area10_001_nBusinessDaysTilPickup"]
-leafData10_001 <- leafDataWest %>% select(ends_with("Status"))
-leafData10_001[] <- lapply(leafData10_001, factor)
-leafData10_001$nDays <- dependent_var
-
-fit <- lm(nDays ~ .,data=leafData10_001)
-
-testRow <- leafData10_001[c(18,24),] %>% select(-matches("nDays"))
-testRow$Area04Status <- leafData10_001[c(19,27),"Area04Status"]
-testRow$Area06Status <- leafData10_001[c(18,25),"Area06Status"]
-rownames(testRow) <- c("A","B")
-summary(fit)
-#predict.lm(fit,testRow)
-leafData10_001[c(18,22),"nDays"]
-```
-
-```{r alternatePredictor, message=FALSE, warning=FALSE}
 # Select only the columns for Area Statuses
 leafDataWestStatuses <- leafDataWest %>%
   select(matches("Area[0-9]+_[0-9]+$"))
@@ -203,13 +149,10 @@ targetArea <- "Area02_026"
 targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
 nDaysTilPickup <- leafDataWest[,targetAreaValName]
 
-collectionRound <- leafDataCollectionRounds[,paste("collectionRound_",targetArea,sep="")]
-
 # Drop any rows that lack "Current" status
 rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
 nDaysTilPickup <- nDaysTilPickup[rowsWithCurrent]
 leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
-collectionRound <- collectionRound[rowsWithCurrent,]
 
 # Rearrange data.frame so that target area is last column
 #  Column order is otherwise unchanged. ("Cut the deck")
@@ -221,60 +164,38 @@ if (targetAreaCol != lastColNum) {
 }
 
 # Find column number of last "Current" status
-testFunc <- function(x) tail(colnames(leafDataWestStatuses)[x=="Current"],1)
-out <- apply(leafDataWestStatuses,1,testFunc)
-nColsFromCurrent <- match(out,colnames(leafDataWestStatuses))
+rightmostCurrentCol <- function(x) {
+  tail(colnames(leafDataWestStatuses)[x=="Current"],1)
+}
+rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
+nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
 
 # Build a data.frame with independent & dependent variables
 modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
-# Make a regression from my 2 vars
-fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
 
-# Create a feature that indicates (True/False) whether a "Current" status
-#   was observed in the last three rows.
-status <- leafDataWestStatuses[,targetArea]
-recentPickup <- status=="Current" | c("Done",head(status,-1))=="Current" | c("Done","Done",head(status,-2))=="Current"
-recentPickupAndDone <- as.factor(recentPickup & status=="Done")
-
-modelData$status <- as.factor(status)
+modelData$status <- as.factor(leafDataWestStatuses[,targetArea])
 modelData$status <- relevel(modelData$status,ref="Done")
-modelData$recentPickupAndDone <- recentPickupAndDone
 
-# Mask out data from after last pickup (nDaysTilPickup is artificially small)
+# Mask out data from after last pickup of the year
+#  (nDaysTilPickup is not a meaningful number here)
 afterLastPickup <- rcumsum(as.numeric(status=="Current"))==0
 modelData <- modelData[!afterLastPickup,]
 
+# Make a regression from my 2 vars
+fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
+
 fit2 <- lm(nDaysTilPickup ~ ., data=modelData)
 
-# modelData$collectionRound <- as.factor(collectionRound[[1]])
-# fit2 <- lm(nDaysTilPickup ~ ., data=modelData)
+altModelData <- modelData[status!="Recently Done",]
+fit3 <- lm(nDaysTilPickup ~ ., data=altModelData)
+
 
 ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
-geom_jitter(aes(colour=factor(recentPickupAndDone)),size=3) +
-stat_smooth(method="lm",col="blue")
+geom_jitter(aes(colour=factor(status)),size=3) +
+stat_smooth(method="lm",col="blue",fill="lightblue",formula = y ~ x)
 
 ```
 
-
-```{r trainDecisionTree, message=FALSE, warning=FALSE, eval=FALSE}
-library(rpart)
-
-#First, let's just try to figure out Area10_1 based on the last 17 rows of data
-
-
-leafData_subset <- leafData %>%
-  select(-ends_with("Pickup")) %>%
-  select(-starts_with("Time"))
-leafData_subset <- leafData_subset[c(21:37),]
-leafData_subset$n <- leafData[c(21:37),"Area10_001_nBusinessDaysTilPickup"]
-#leafData_subset
-
-fit <- rpart(n ~ ., data=leafData_subset, minsplit=2)
-par(mfrow = c(1,2), xpd = NA) # otherwise on some devices the text is clipped
-plot(fit)
-text(fit, use.n = TRUE)
-
-```
 
 A thought: compress the dataset before training like so:
 
