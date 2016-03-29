@@ -164,6 +164,17 @@ if (targetAreaCol != lastColNum) {
   leafDataWestStatuses <- leafDataWestStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
 }
 
+### Was testing out using rle to find the beginning and end
+### of the wave of "Done" statuses rolling through town, when
+### I realized I could probably get away with something much
+### simpler: rowSums(status=="Current")
+# # Find first and last "Current" column location, given that 
+# #  the block of "Current"s might be broken up to across the
+# #  beginning and end of the data.frame
+# listRunsInStatuses <- apply(leafDataWestStatuses,1,rle)
+# lapply(listRunsInStatuses,function (x) cumsum(x$length)[x$values=="Done" & x$length==max(x$length[x$values=="Done"])])
+
+
 # Find column number of last "Current" status
 rightmostCurrentCol <- function(x) {
   tail(colnames(leafDataWestStatuses)[x=="Current"],1)
@@ -182,6 +193,9 @@ modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 
 modelData$status <- as.factor(leafDataWestStatuses[!afterLastPickup,targetArea])
 modelData$status <- relevel(modelData$status,ref="Done")
+
+# Add me later!
+# modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
 
 # Make a regression from my 2 vars
 fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
