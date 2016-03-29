@@ -142,9 +142,10 @@ leafDataWestStatuses <- leafDataWest %>%
   select(matches("Area[0-9]+_[0-9]+$"))
 
 # Choose an area of interest
-targetArea <- "Area02_026"
-# targetArea <- "Area04_004"
+# targetArea <- "Area02_026"
+targetArea <- "Area04_004"
 # targetArea <- "Area08_001"
+# targetArea <- "Area10_010"
 # Assign dependent variable to a vector
 targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
 nDaysTilPickup <- leafDataWest[,targetAreaValName]
@@ -170,29 +171,48 @@ rightmostCurrentCol <- function(x) {
 rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
 nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
 
+# Mask out data from after last pickup of the year
+#  (nDaysTilPickup is not a meaningful number here)
+afterLastPickup <- rcumsum(as.numeric(leafDataWestStatuses[,targetArea]=="Current"))==0
+nDaysTilPickup <- nDaysTilPickup[!afterLastPickup]
+nColsFromCurrent <- nColsFromCurrent[!afterLastPickup]
+
 # Build a data.frame with independent & dependent variables
 modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 
-modelData$status <- as.factor(leafDataWestStatuses[,targetArea])
+modelData$status <- as.factor(leafDataWestStatuses[!afterLastPickup,targetArea])
 modelData$status <- relevel(modelData$status,ref="Done")
-
-# Mask out data from after last pickup of the year
-#  (nDaysTilPickup is not a meaningful number here)
-afterLastPickup <- rcumsum(as.numeric(status=="Current"))==0
-modelData <- modelData[!afterLastPickup,]
 
 # Make a regression from my 2 vars
 fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
 
 fit2 <- lm(nDaysTilPickup ~ ., data=modelData)
 
-altModelData <- modelData[status!="Recently Done",]
+altModelData <- modelData[modelData$status!="Recently Done",]
 fit3 <- lm(nDaysTilPickup ~ ., data=altModelData)
 
+altModelData2 <- modelData[modelData$status=="Next" | modelData$status=="Done",]
+fit4 <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nColsFromCurrent*status, data=altModelData2)
+fit4 <- lm(nDaysTilPickup ~ ., data=altModelData2)
+
+coefficients2 <- coef(fit2)
+coefficients3 <- coef(fit3)
+coefficients4 <- coef(fit4)
 
 ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
 geom_jitter(aes(colour=factor(status)),size=3) +
-stat_smooth(method="lm",col="blue",fill="lightblue",formula = y ~ x)
+#stat_smooth(method="lm",col="blue",fill="lightblue",formula = y ~ x) +
+  geom_abline(aes(intercept=coefficients4[1],slope=coefficients4[2]),color="red") +
+  geom_abline(aes(intercept=coefficients4[1]+coefficients4[3],slope=coefficients4[2]),color="cyan")
+#   geom_abline(aes(intercept=coefficients2[1]+coefficients2[4],slope=coefficients2[2]),color="blue") +
+#   geom_abline(aes(intercept=coefficients2[1]+coefficients2[5],slope=coefficients2[2]),color="purple")
+
+# ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
+# geom_jitter(aes(colour=factor(status)),size=3) +
+# #stat_smooth(method="lm",col="blue",fill="lightblue",formula = y ~ x) +
+#   geom_abline(aes(intercept=coefficients3[1],slope=coefficients3[2]),color="red") +
+#   geom_abline(aes(intercept=coefficients3[1]+coefficients3[3],slope=coefficients3[2]),color="green") +
+#   geom_abline(aes(intercept=coefficients3[1]+coefficients3[4],slope=coefficients3[2]),color="blue")
 
 ```
 
