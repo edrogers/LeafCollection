@@ -143,9 +143,9 @@ leafDataWestStatuses <- leafDataWest %>%
 
 # Choose an area of interest
 # targetArea <- "Area02_026"
-targetArea <- "Area04_004"
+# targetArea <- "Area04_004"
 # targetArea <- "Area08_001"
-# targetArea <- "Area10_010"
+targetArea <- "Area10_010"
 # Assign dependent variable to a vector
 targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
 nDaysTilPickup <- leafDataWest[,targetAreaValName]
@@ -163,17 +163,6 @@ lastColNum <- ncol(leafDataWestStatuses)
 if (targetAreaCol != lastColNum) {
   leafDataWestStatuses <- leafDataWestStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
 }
-
-### Was testing out using rle to find the beginning and end
-### of the wave of "Done" statuses rolling through town, when
-### I realized I could probably get away with something much
-### simpler: rowSums(status=="Current")
-# # Find first and last "Current" column location, given that 
-# #  the block of "Current"s might be broken up to across the
-# #  beginning and end of the data.frame
-# listRunsInStatuses <- apply(leafDataWestStatuses,1,rle)
-# lapply(listRunsInStatuses,function (x) cumsum(x$length)[x$values=="Done" & x$length==max(x$length[x$values=="Done"])])
-
 
 # Find column number of last "Current" status
 rightmostCurrentCol <- function(x) {
@@ -193,51 +182,12 @@ modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 
 modelData$status <- as.factor(leafDataWestStatuses[!afterLastPickup,targetArea])
 modelData$status <- relevel(modelData$status,ref="Done")
+modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
+modelData <- modelData[modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current",]
 
-# Add me later!
-# modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
-
-# Make a regression from my 2 vars
-fit <- lm(nDaysTilPickup ~ nColsFromCurrent, data=modelData)
-
-fit2 <- lm(nDaysTilPickup ~ ., data=modelData)
-
-altModelData <- modelData[modelData$status!="Recently Done",]
-fit3 <- lm(nDaysTilPickup ~ ., data=altModelData)
-
-altModelData2 <- modelData[modelData$status=="Next" | modelData$status=="Done",]
-fit4 <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nColsFromCurrent*status, data=altModelData2)
-fit4 <- lm(nDaysTilPickup ~ ., data=altModelData2)
-
-coefficients2 <- coef(fit2)
-coefficients3 <- coef(fit3)
-coefficients4 <- coef(fit4)
-
-ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
-geom_jitter(aes(colour=factor(status)),size=3) +
-#stat_smooth(method="lm",col="blue",fill="lightblue",formula = y ~ x) +
-  geom_abline(aes(intercept=coefficients4[1],slope=coefficients4[2]),color="red") +
-  geom_abline(aes(intercept=coefficients4[1]+coefficients4[3],slope=coefficients4[2]),color="cyan")
-#   geom_abline(aes(intercept=coefficients2[1]+coefficients2[4],slope=coefficients2[2]),color="blue") +
-#   geom_abline(aes(intercept=coefficients2[1]+coefficients2[5],slope=coefficients2[2]),color="purple")
-
-# ggplot(data=modelData,aes(x=nColsFromCurrent,y=nDaysTilPickup)) +
-# geom_jitter(aes(colour=factor(status)),size=3) +
-# #stat_smooth(method="lm",col="blue",fill="lightblue",formula = y ~ x) +
-#   geom_abline(aes(intercept=coefficients3[1],slope=coefficients3[2]),color="red") +
-#   geom_abline(aes(intercept=coefficients3[1]+coefficients3[3],slope=coefficients3[2]),color="green") +
-#   geom_abline(aes(intercept=coefficients3[1]+coefficients3[4],slope=coefficients3[2]),color="blue")
+# Make a regression
+fit <- lm(nDaysTilPickup ~ . + status*nCurrent, data=modelData)
+ggplot(data=modelData,aes(y=fit$fitted.values,x=nDaysTilPickup)) +
+geom_point(aes(colour=factor(status)),size=3)
 
 ```
-
-
-A thought: compress the dataset before training like so:
-
-To train on Area10_5 reduce data.frame down to
-Statuses of all areas in District 10
-Statuses of all areas in District 8 (the "previous" district)
-True/False factor: Does District 6 have a "Current" Area?
-True/False factor: Does District 4 have a "Current" Area?
-True/False factor: Does District 2 have a "Current" Area?
-
-This should reduce training from 221 inputs to ~47.
