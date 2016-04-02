@@ -141,19 +141,19 @@ leafDataWest <- leafData %>%
 leafDataWestStatuses <- leafDataWest %>%
   select(matches("Area[0-9]+_[0-9]+$"))
 
-# Choose an area of interest
-# targetArea <- "Area02_026"
-# targetArea <- "Area04_004"
-# targetArea <- "Area08_001"
-targetArea <- "Area10_010"
-# Assign dependent variable to a vector
-targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
-nDaysTilPickup <- leafDataWest[,targetAreaValName]
-
 # Drop any rows that lack "Current" status
 rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
-nDaysTilPickup <- nDaysTilPickup[rowsWithCurrent]
 leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
+
+# Choose an area of interest
+# targetArea <- "Area02_026"
+targetArea <- "Area04_004"
+# targetArea <- "Area08_001"
+# targetArea <- "Area10_010"
+
+# Assign dependent variable to a vector
+targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
+nDaysTilPickup <- leafDataWest[rowsWithCurrent,targetAreaValName]
 
 # Rearrange data.frame so that target area is last column
 #  Column order is otherwise unchanged. ("Cut the deck")
@@ -187,7 +187,8 @@ modelData <- modelData[modelData$status=="Next" | modelData$status=="Done" | mod
 
 # Make a regression
 fit <- lm(nDaysTilPickup ~ . + status*nCurrent, data=modelData)
+
 ggplot(data=modelData,aes(y=fit$fitted.values,x=nDaysTilPickup)) +
-geom_point(aes(colour=factor(status)),size=3)
+  geom_point(aes(colour=factor(status)),size=3) 
 
 ```
