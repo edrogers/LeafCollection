@@ -49,6 +49,10 @@ leafData$Time.Stamp <- as.POSIXct(leafData$Time.Stamp,
 TimeStamps <- leafData$Time.Stamp
 leafData <- leafData[,-which(colnames(leafData) == "Time.Stamp")]
 
+# In Areas where a "Next" is followed by a "Done", change that 
+#  "Next" to "Current". (Happens rarely, but confuses the model)
+leafData[rbind("Done",head(leafData,-1))=="Next" & leafData=="Done"] <- "Current"
+
 # Using the bizdays library, the number of business days between any two
 # rows in the data.frame can be computed.
 cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
@@ -137,58 +141,96 @@ leafDataWest <- leafData %>%
   select(-starts_with("Area07")) %>%
   select(-starts_with("Area09"))
 
-# Select only the columns for Area Statuses
-leafDataWestStatuses <- leafDataWest %>%
-  select(matches("Area[0-9]+_[0-9]+$"))
-
-# Drop any rows that lack "Current" status
-rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
-leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
-
 # Choose an area of interest
 # targetArea <- "Area02_026"
 targetArea <- "Area04_004"
 # targetArea <- "Area08_001"
 # targetArea <- "Area10_010"
 
-# Assign dependent variable to a vector
-targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
-nDaysTilPickup <- leafDataWest[rowsWithCurrent,targetAreaValName]
+generateModelData <- function(leafDataWest,targetArea) {
 
-# Rearrange data.frame so that target area is last column
-#  Column order is otherwise unchanged. ("Cut the deck")
-targetAreaCol <- which(colnames(leafDataWestStatuses) %in% targetArea)
-nextColNum <- (targetAreaCol)%%ncol(leafDataWestStatuses)+1
-lastColNum <- ncol(leafDataWestStatuses)
-if (targetAreaCol != lastColNum) {
-  leafDataWestStatuses <- leafDataWestStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
+  # Select only the columns for Area Statuses
+  leafDataWestStatuses <- leafDataWest %>%
+    select(matches("Area[0-9]+_[0-9]+$"))
+
+  # Drop any rows that lack "Current" status
+  rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
+  leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
+
+  # Assign dependent variable to a vector
+  targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
+  nDaysTilPickup <- leafDataWest[rowsWithCurrent,targetAreaValName]
+  timeStamp      <- leafDataWest[rowsWithCurrent,"TimeStamps"]
+  
+  # Rearrange data.frame so that target area is last column
+  #  Column order is otherwise unchanged. ("Cut the deck")
+  targetAreaCol <- which(colnames(leafDataWestStatuses) %in% targetArea)
+  nextColNum <- (targetAreaCol)%%ncol(leafDataWestStatuses)+1
+  lastColNum <- ncol(leafDataWestStatuses)
+  if (targetAreaCol != lastColNum) {
+    leafDataWestStatuses <- leafDataWestStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
+  }
+
+  # Find column number of last "Current" status
+  rightmostCurrentCol <- function(x) {
+    tail(colnames(leafDataWestStatuses)[x=="Current"],1)
+  }
+  rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
+  nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
+
+  # Mask out data from after last pickup of the year
+  #  (nDaysTilPickup is not a meaningful number here)
+  afterLastPickup <- rcumsum(as.numeric(leafDataWestStatuses[,targetArea]=="Current"))==0
+  nDaysTilPickup <- nDaysTilPickup[!afterLastPickup]
+  nColsFromCurrent <- nColsFromCurrent[!afterLastPickup]
+  timeStamp      <- timeStamp[!afterLastPickup]
+  
+  # Build a data.frame with independent & dependent variables
+  modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
+
+  modelData$status <- as.factor(leafDataWestStatuses[!afterLastPickup,targetArea])
+  modelData$status <- relevel(modelData$status,ref="Done")
+  modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
+  modelData$timeStamps <- timeStamp
+  modelData$weekOfYear <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%W")
+  modelData$month <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%m")
+  
+  modelData
+}
+  #modelData <- modelData[modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current",]
+
+# Select only the columns for Area Statuses
+leafDataWestStatuses <- leafDataWest %>%
+  select(matches("Area[0-9]+_[0-9]+$"))
+
+modelData <- data.frame()
+for (area in colnames(leafDataWestStatuses)) {
+  thisAreaModel <- cbind(Area=area,generateModelData(leafDataWest,area))
+  modelData <- rbind(modelData,thisAreaModel)
 }
 
-# Find column number of last "Current" status
-rightmostCurrentCol <- function(x) {
-  tail(colnames(leafDataWestStatuses)[x=="Current"],1)
+models <- vector(mode="list", length=length(levels(modelData$Area)))
+dataForPlots <- data.frame()
+for(myArea in levels(modelData$Area)) {
+  subset <- modelData[modelData$Area==myArea & (modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current"),]
+  subset$status <- factor(subset$status)
+
+  fit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent, data=subset)
+  models[[myArea]] <- fit
+  
+  dataForPlots <- rbind(dataForPlots,data.frame(subset,fitted=fit$fitted.values,residuals=fit$residuals))
 }
-rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
-nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
+```
 
-# Mask out data from after last pickup of the year
-#  (nDaysTilPickup is not a meaningful number here)
-afterLastPickup <- rcumsum(as.numeric(leafDataWestStatuses[,targetArea]=="Current"))==0
-nDaysTilPickup <- nDaysTilPickup[!afterLastPickup]
-nColsFromCurrent <- nColsFromCurrent[!afterLastPickup]
+```{r somePlots, message=FALSE,warning=FALSE}
+ggplot(data=dataForPlots) + geom_point(aes(x=nDaysTilPickup,y=residuals,colour=month),size=4,alpha=0.6)
 
-# Build a data.frame with independent & dependent variables
-modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
+ggplot(data=dataForPlots) + geom_point(aes(x=nDaysTilPickup,y=residuals,colour=weekOfYear),size=4,alpha=0.6)
 
-modelData$status <- as.factor(leafDataWestStatuses[!afterLastPickup,targetArea])
-modelData$status <- relevel(modelData$status,ref="Done")
-modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
-modelData <- modelData[modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current",]
+# fitted.values vs nDaysTilPickup for specific area
+targetArea="Area10_001"
+ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_point(aes(x=nDaysTilPickup,y=models[[targetArea]]$fitted.values,colour=status),size=3)
 
-# Make a regression
-fit <- lm(nDaysTilPickup ~ . + status*nCurrent, data=modelData)
-
-ggplot(data=modelData,aes(y=fit$fitted.values,x=nDaysTilPickup)) +
-  geom_point(aes(colour=factor(status)),size=3) 
-
+# residuals vs nDaysTilPickup for all areas
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=status),size=5,alpha=0.3)
 ```
