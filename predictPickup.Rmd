@@ -55,7 +55,9 @@ leafData[rbind("Done",head(leafData,-1))=="Next" & leafData=="Done"] <- "Current
 
 # Using the bizdays library, the number of business days between any two
 # rows in the data.frame can be computed.
-cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
+madisonHolidays <- c(holidayNYSE(2015),timeDate("2015-11-27 05:00:00",format="%Y-%m-%d %H:%M:%S",FinCenter = "NewYork"))
+cal <- Calendar(madisonHolidays,weekdays = c("saturday","sunday"))
+# cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
 dates <- data.frame(head(TimeStamps,-1))
 colnames(dates) <- "left"
 dates$right <- TimeStamps[-1]
@@ -213,6 +215,7 @@ models <- vector(mode="list", length=length(levels(modelData$Area)))
 dataForPlots <- data.frame()
 for(myArea in levels(modelData$Area)) {
   subset <- modelData[modelData$Area==myArea & (modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current"),]
+#  subset <- modelData[modelData$Area==myArea & (modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current"),c("nDaysTilPickup","nColsFromCurrent","status","nCurrent")]
   subset$status <- factor(subset$status)
 
   fit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent, data=subset)
@@ -225,7 +228,7 @@ for(myArea in levels(modelData$Area)) {
 ```{r somePlots, message=FALSE,warning=FALSE}
 ggplot(data=dataForPlots) + geom_point(aes(x=nDaysTilPickup,y=residuals,colour=month),size=4,alpha=0.6)
 
-ggplot(data=dataForPlots) + geom_point(aes(x=nDaysTilPickup,y=residuals,colour=weekOfYear),size=4,alpha=0.6)
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=weekOfYear),size=4)
 
 # fitted.values vs nDaysTilPickup for specific area
 targetArea="Area10_001"
