@@ -180,6 +180,13 @@ generateModelData <- function(leafDataWest,targetArea) {
   rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
   nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
 
+  # Find column number of first "Next" status, for use in case of "Recently Done"
+  leftmostDoneOrNextCol <- function(x) {
+    head(colnames(leafDataWestStatuses)[x=="Next" | x=="Done"],1)
+  }
+  leftmostDoneOrNextColName <- apply(leafDataWestStatuses,1,leftmostDoneOrNextCol)
+  nColsFromCurrent <- ifelse(leafDataWestStatuses[,targetArea]=="Recently Done",ncol(leafDataWestStatuses)-match(leftmostDoneOrNextColName,colnames(leafDataWestStatuses)),nColsFromCurrent)
+
   # Mask out data from after last pickup of the year
   #  (nDaysTilPickup is not a meaningful number here)
   afterLastPickup <- rcumsum(as.numeric(leafDataWestStatuses[,targetArea]=="Current"))==0
@@ -214,7 +221,7 @@ for (area in colnames(leafDataWestStatuses)) {
 models <- vector(mode="list", length=length(levels(modelData$Area)))
 dataForPlots <- data.frame()
 for(myArea in levels(modelData$Area)) {
-  subset <- modelData[modelData$Area==myArea & (modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current"),]
+  subset <- modelData[modelData$Area==myArea & (modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current" | modelData$status=="Recently Done"),]
 #  subset <- modelData[modelData$Area==myArea & (modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current"),c("nDaysTilPickup","nColsFromCurrent","status","nCurrent")]
   subset$status <- factor(subset$status)
 
@@ -233,8 +240,11 @@ ggplot(data=dataForPlots) + geom_point(aes(x=nDaysTilPickup,y=residuals,colour=m
 ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=weekOfYear),size=4)
 
 # fitted.values vs nDaysTilPickup for specific area
-targetArea="Area10_001"
+targetArea="Area08_018"
 ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_point(aes(x=nDaysTilPickup,y=models[[targetArea]]$fitted.values,colour=status),size=3)
+
+targetArea="Area08_018"
+ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_point(aes(x=nDaysTilPickup,y=nColsFromCurrent,colour=status),size=3)
 
 # residuals vs nDaysTilPickup for all areas
 ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=status),size=5,alpha=0.3)
