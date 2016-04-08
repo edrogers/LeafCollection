@@ -223,6 +223,8 @@ for(myArea in levels(modelData$Area)) {
   
   dataForPlots <- rbind(dataForPlots,data.frame(subset,fitted=fit$fitted.values,residuals=fit$residuals))
 }
+
+saveRDS(models, "models.rds", ascii=TRUE)
 ```
 
 ```{r somePlots, message=FALSE,warning=FALSE}
