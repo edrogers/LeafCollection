@@ -146,12 +146,9 @@ leafDataWest <- leafData %>%
   select(-starts_with("Area07")) %>%
   select(-starts_with("Area09"))
 
-# Choose an area of interest
-# targetArea <- "Area02_026"
-targetArea <- "Area04_004"
-# targetArea <- "Area08_001"
-# targetArea <- "Area10_010"
-
+# Define a function that will, for any area, generate a
+# data.frame of values to construct a regression (including
+# both the regressors and target output).
 generateModelData <- function(leafDataWest,targetArea) {
 
   # Select only the columns for Area Statuses
@@ -192,9 +189,6 @@ generateModelData <- function(leafDataWest,targetArea) {
   nColsFromCurrent <- ifelse(nColsFromCurrent < 30 & leafDataWestStatuses[,targetArea]=="Recently Done", 
                              nColsReplacementValue,
                              nColsFromCurrent)
-#   nColsFromCurrent <- ifelse(leafDataWestStatuses[,targetArea]=="Recently Done",apply(cbind(ncol(leafDataWestStatuses)-match(leftmostDoneOrNextColName,colnames(leafDataWestStatuses)),nColsFromCurrent),1,max),nColsFromCurrent)
-#   nColsFromCurrent <- ifelse(leafDataWestStatuses[,targetArea]=="Recently Done",ncol(leafDataWestStatuses)-match(leftmostDoneOrNextColName,colnames(leafDataWestStatuses)),nColsFromCurrent)
-#   nColsFromCurrent <- ifelse(leafDataWestStatuses[,targetArea]=="Recently Done",apply(cbind(ncol(leafDataWestStatuses)-match(leftmostDoneOrNextColName,colnames(leafDataWestStatuses)),nColsFromCurrent),1,max),nColsFromCurrent)
 
   # Mask out data from after last pickup of the year
   #  (nDaysTilPickup is not a meaningful number here)
@@ -215,21 +209,21 @@ generateModelData <- function(leafDataWest,targetArea) {
   
   modelData
 }
-  #modelData <- modelData[modelData$status=="Next" | modelData$status=="Done" | modelData$status=="Current",]
 
 # Select only the columns for Area Statuses
 leafDataWestStatuses <- leafDataWest %>%
   select(matches("Area[0-9]+_[0-9]+$"))
 
+# Run our function for each Area, appending it to a 
+# master data.frame, "modelData"
 modelData <- data.frame()
 for (area in colnames(leafDataWestStatuses)) {
   thisAreaModel <- cbind(Area=area,generateModelData(leafDataWest,area))
   modelData <- rbind(modelData,thisAreaModel)
 }
 
-models <- vector(mode="list", length=length(levels(modelData$Area)))
-dataForPlots <- data.frame()
-
+# Build various regressions, cross-validating each with
+# k-fold validation. Choose the best.
 tc <- trainControl("cv",10,savePredictions = TRUE)
 #Proposed fits:
 (fit <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent,data=modelData,method="lm",trControl=tc))
