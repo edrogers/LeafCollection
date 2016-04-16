@@ -200,8 +200,7 @@ generateModelData <- function(leafDataWest,targetArea) {
   # Build a data.frame with independent & dependent variables
   modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 
-  modelData$status <- as.factor(leafDataWestStatuses[!afterLastPickup,targetArea])
-  modelData$status <- relevel(modelData$status,ref="Done")
+  modelData$status <- factor(leafDataWestStatuses[!afterLastPickup,targetArea],levels=c("Done","Current","Next","Recently Done","Not Done"))
   modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
   modelData$timeStamps <- timeStamp
   modelData$weekOfYear <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%W")
@@ -231,8 +230,10 @@ tc <- trainControl("cv",10,savePredictions = TRUE)
 (fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelData,method="lm",trControl=tc))
 (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelData,method="lm",trControl=tc))
 
-selectedFit <- fit3
-dataForPlots <- data.frame(modelData,fitted=selectedFit$finalModel$fitted.values,residuals=selectedFit$finalModel$residuals)
+#fit3 is best
+selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelData)
+
+dataForPlots <- data.frame(modelData,fitted=selectedFit$fitted.values,residuals=selectedFit$residuals)
 # }
 
 saveRDS(selectedFit, "model.rds", ascii=TRUE)
