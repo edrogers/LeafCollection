@@ -11,7 +11,6 @@ Load libraries and import the data
 library(tidyr)
 library(dplyr)
 library(reshape2)
-library(FSA)
 library(lazyeval)
 library(bizdays)
 library(timeDate)
@@ -19,6 +18,7 @@ library(ggplot2)
 library(DAAG)
 library(caret)
 set.seed(1234)
+sessionInfo()
 
 # Read in the data from the CSV. Data comes in very tall and narrow.
 # For each visit to the city's website, many observations are made
@@ -56,9 +56,24 @@ leafData <- leafData[,-which(colnames(leafData) == "Time.Stamp")]
 #  "Next" to "Current". (Happens rarely, but confuses the model)
 leafData[rbind("Done",head(leafData,-1))=="Next" & leafData=="Done"] <- "Current"
 
+# Cut off each run of consecutive "Current" statuses to a max of 3 in a row
+#  (Happens all too frequently in Brush pickup)
+conseq <- function(vec) { 
+  vec * ave(vec,c(0L, cumsum(diff(vec) != 0)),FUN = seq_along) 
+}
+currentStreakLength <- apply(leafData=="Current",2,conseq)
+leafData[currentStreakLength>3] <- "Done"
+
 # Using the bizdays library, the number of business days between any two
 # rows in the data.frame can be computed.
-madisonHolidays <- c(holidayNYSE(2015),timeDate("2015-11-27 05:00:00",format="%Y-%m-%d %H:%M:%S",FinCenter = "NewYork"))
+madisonHolidays <- c(holidayNYSE(2015),
+                     holidayNYSE(2016),
+                     timeDate("2015-11-27 05:00:00",
+                              format="%Y-%m-%d %H:%M:%S",
+                              FinCenter = "NewYork"),
+                     timeDate("2016-11-25 05:00:00",
+                              format="%Y-%m-%d %H:%M:%S",
+                              FinCenter = "NewYork"))
 cal <- Calendar(madisonHolidays,weekdays = c("saturday","sunday"))
 # cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
 dates <- data.frame(head(TimeStamps,-1))
@@ -105,6 +120,10 @@ leafData <- leafData %>%
 
 # Next, using collectionRound_ for each Area as a grouping
 # variable, perform a cumsum on nBusinessDaysTilPickup
+
+rcumsum <- function(vec) {
+  rev(cumsum(rev(vec)))
+}
 
 for (col in leafDataAreaNames)
 {
@@ -180,7 +199,12 @@ generateModelData <- function(leafDataWest,targetArea) {
   rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
   nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
 
-  # Find column number of first "Next" status, for use in case of "Recently Done"
+  # In case nColsFromCurrent is low, but the area is "Recently Done",
+  #  replace the nColsFromCurrent value with nColsFromFurthest-"Done"-or-"Next".
+  #  (In essense, "Recently Done" areas can sometimes have misleadingly low
+  #  values of nColsFromCurrent when pickups are done slightly out of sequence.
+  #  Accuracy isn't crucial in this situation, as pickup was "Recently Done",
+  #  so it's sufficient to replace the number with something larger.)
   leftmostDoneOrNextCol <- function(x) {
     head(colnames(leafDataWestStatuses)[x=="Next" | x=="Done"],1)
   }
@@ -193,10 +217,12 @@ generateModelData <- function(leafDataWest,targetArea) {
   # Mask out data from after last pickup of the year
   #  (nDaysTilPickup is not a meaningful number here)
   afterLastPickup <- rcumsum(as.numeric(leafDataWestStatuses[,targetArea]=="Current"))==0
+  # Any time nDaysTilPickup exceeds 50, it's not actually meaningful
+  afterLastPickup <- afterLastPickup | nDaysTilPickup > 50
   nDaysTilPickup <- nDaysTilPickup[!afterLastPickup]
   nColsFromCurrent <- nColsFromCurrent[!afterLastPickup]
   timeStamp      <- timeStamp[!afterLastPickup]
-  
+    
   # Build a data.frame with independent & dependent variables
   modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 
@@ -220,6 +246,7 @@ for (area in colnames(leafDataWestStatuses)) {
   thisAreaModel <- cbind(Area=area,generateModelData(leafDataWest,area))
   modelData <- rbind(modelData,thisAreaModel)
 }
+modelData <- modelData[complete.cases(modelData),]
 
 # Build various regressions, cross-validating each with
 # k-fold validation. Choose the best.
@@ -228,7 +255,7 @@ tc <- trainControl("cv",10,savePredictions = TRUE)
 (fit <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent,data=modelData,method="lm",trControl=tc))
 (fit2 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelData,method="lm",trControl=tc))
 (fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelData,method="lm",trControl=tc))
-(fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelData,method="lm",trControl=tc))
+# (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelData,method="lm",trControl=tc))
 
 #fit3 is best
 selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelData)
