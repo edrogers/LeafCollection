@@ -17,6 +17,6 @@ curl http://www.cityofmadison.com/streets/documents/brush/BRUSH_COLLECTION_DISTR
 curl http://www.cityofmadison.com/streets/documents/brush/BRUSH_COLLECTION_DISTRICT_9.pdf -o /home/ed/Documents/LeafCollection/Brush/${nowdate}-map9.pdf
 
 sleep 60
-/home/ed/Documents/LeafCollection/notifyBrush.py
+# /home/ed/Documents/LeafCollection/notifyBrush.py
 
 exit
