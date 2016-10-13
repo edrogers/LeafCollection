@@ -235,7 +235,7 @@ generateModelData <- function(leafDataSideOfTown,targetArea) {
   modelData$status <- factor(leafDataStatuses[!afterLastPickup,targetArea],levels=c("Done","Current","Next","Recently Done","Not Done"))
   modelData$nCurrent <- rowSums(leafDataStatuses[!afterLastPickup,]=="Current")
   modelData$timeStamps <- timeStamp
-  modelData$weekOfYear <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%W")
+  modelData$weekOfYear <- factor(format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%W"))
   modelData$month <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%m")
   
   modelData
@@ -264,6 +264,8 @@ tc <- trainControl("cv",10,savePredictions = TRUE)
 (fit2 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelDataWest,method="lm",trControl=tc))
 (fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataWest,method="lm",trControl=tc))
 # (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelDataWest,method="lm",trControl=tc))
+(fit5 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + month,data=modelDataWest,method="lm",trControl=tc))
+(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + weekOfYear,data=modelDataEast,method="lm",trControl=tc))
 
 #fit3 is best
 selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataWest)
@@ -315,9 +317,11 @@ tc <- trainControl("cv",10,savePredictions = TRUE)
 (fit2 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelDataEast,method="lm",trControl=tc))
 (fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataEast,method="lm",trControl=tc))
 # (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelDataEast,method="lm",trControl=tc))
+(fit5 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + month,data=modelDataEast,method="lm",trControl=tc))
+(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + weekOfYear,data=modelDataEast,method="lm",trControl=tc))
 
-#fit2 is best
-selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelDataEast)
+#fit6 is best
+selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + weekOfYear,data=modelDataEast)
 
 dataForPlots <- data.frame(modelDataEast,fitted=selectedFit$fitted.values,residuals=selectedFit$residuals)
 # }
@@ -332,11 +336,11 @@ ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=
 ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=weekOfYear),size=4)
 
 # fitted.values vs nDaysTilPickup for specific area
-targetArea="Area07_018"
-targetArea="Area05_016"
+targetArea="Area09_016"
+targetArea="Area03_012"
 ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_abline(aes(slope=1,intercept=0)) + geom_point(aes(x=nDaysTilPickup,y=fitted,colour=status),size=3)
 
-targetArea="Area07_018"
+targetArea="Area09_016"
 ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_point(aes(x=nDaysTilPickup,y=nColsFromCurrent,colour=status),size=3)
 
 # residuals vs nDaysTilPickup for all areas
