@@ -265,7 +265,7 @@ tc <- trainControl("cv",10,savePredictions = TRUE)
 (fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataWest,method="lm",trControl=tc))
 # (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelDataWest,method="lm",trControl=tc))
 (fit5 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + month,data=modelDataWest,method="lm",trControl=tc))
-(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + weekOfYear,data=modelDataEast,method="lm",trControl=tc))
+(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + weekOfYear,data=modelDataWest,method="lm",trControl=tc))
 
 #fit3 is best
 selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataWest)
@@ -328,7 +328,6 @@ dataForPlots <- data.frame(modelDataEast,fitted=selectedFit$fitted.values,residu
 
 saveRDS(selectedFit, "modelEastLeaf.rds", ascii=TRUE)
 ```
-
 
 ```{r someMorePlots, message=FALSE,warning=FALSE}
 ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=month),size=4,alpha=0.6)
