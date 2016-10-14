@@ -7,9 +7,9 @@ import math
 from madisonStreetsSubdivisions import AllDistricts,AllDistrictsNames,NotDoneStatuses,DoneStatuses,CurrentStatuses,NextStatuses
 
 dirName=os.path.dirname(os.path.realpath(__file__))
-dataSourceDir="{}/Leaf".format(dirName)
+dataSourceDir="{}/Brush".format(dirName)
 dataSourceDirContents=os.listdir(dataSourceDir)
-csvOutputFilename="mapStatuses.csv"
+csvOutputFilename="mapStatusesBrush.csv"
 with open(csvOutputFilename,'w') as csvOutputFile :
     csvOutputFile.write("Time Stamp,District,Area,Status\n")
 timeStampRegEx=re.compile("\d{10,}")
