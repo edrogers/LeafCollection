@@ -66,7 +66,14 @@ leafData[currentStreakLength>3] <- "Done"
 
 # Using the bizdays library, the number of business days between any two
 # rows in the data.frame can be computed.
-madisonHolidays <- c(holidayNYSE(2015),timeDate("2015-11-27 05:00:00",format="%Y-%m-%d %H:%M:%S",FinCenter = "NewYork"),holidayNYSE(2016),timeDate("2016-11-25 05:00:00",format="%Y-%m-%d %H:%M:%S",FinCenter = "NewYork"))
+madisonHolidays <- c(holidayNYSE(2015),
+                     holidayNYSE(2016),
+                     timeDate("2015-11-27 05:00:00",
+                              format="%Y-%m-%d %H:%M:%S",
+                              FinCenter = "NewYork"),
+                     timeDate("2016-11-25 05:00:00",
+                              format="%Y-%m-%d %H:%M:%S",
+                              FinCenter = "NewYork"))
 cal <- Calendar(madisonHolidays,weekdays = c("saturday","sunday"))
 # cal <- Calendar(holidayNYSE(2015),weekdays = c("saturday","sunday"))
 dates <- data.frame(head(TimeStamps,-1))
@@ -147,66 +154,78 @@ leafDataNames <- names(leafData)
 leafData[leafData=="NA"] <- NA
 leafData <- cbind(TimeStamps,leafData)
 
-# Restrict to 2016
-leafData <- leafData[strftime(leafData$TimeStamps,"%Y") == 2016,]
-```
+#Separate districts into East & West datasets
+leafDataEast <- leafData %>%
+  select(-starts_with("Area02")) %>%
+  select(-starts_with("Area04")) %>%
+  select(-starts_with("Area06")) %>%
+  select(-starts_with("Area08")) %>%
+  select(-starts_with("Area10"))
 
-```{r buildWestPredictor, message=FALSE,warning=FALSE}
-#First, look only at western (even numbered) districts
 leafDataWest <- leafData %>%
   select(-starts_with("Area01")) %>%
   select(-starts_with("Area03")) %>%
   select(-starts_with("Area05")) %>%
   select(-starts_with("Area07")) %>%
   select(-starts_with("Area09"))
+```
 
+```{r extractIndependentAndDependentVariables, message=FALSE,warning=FALSE}
 # Define a function that will, for any area, generate a
 # data.frame of values to construct a regression (including
 # both the regressors and target output).
-generateModelData <- function(leafDataWest,targetArea) {
+generateModelData <- function(leafDataSideOfTown,targetArea) {
 
   # Select only the columns for Area Statuses
-  leafDataWestStatuses <- leafDataWest %>%
+  leafDataStatuses <- leafDataSideOfTown %>%
     select(matches("Area[0-9]+_[0-9]+$"))
 
   # Drop any rows that lack "Current" status
-  rowsWithCurrent <- rowSums(leafDataWestStatuses=="Current")>0
-  leafDataWestStatuses <- leafDataWestStatuses[rowsWithCurrent,]
+  rowsWithCurrent <- rowSums(leafDataStatuses=="Current")>0
+  leafDataStatuses <- leafDataStatuses[rowsWithCurrent,]
 
   # Assign dependent variable to a vector
   targetAreaValName <- paste(targetArea,"_nBusinessDaysTilPickup",sep="")
-  nDaysTilPickup <- leafDataWest[rowsWithCurrent,targetAreaValName]
-  timeStamp      <- leafDataWest[rowsWithCurrent,"TimeStamps"]
+  nDaysTilPickup <- leafDataSideOfTown[rowsWithCurrent,targetAreaValName]
+  timeStamp      <- leafDataSideOfTown[rowsWithCurrent,"TimeStamps"]
   
   # Rearrange data.frame so that target area is last column
   #  Column order is otherwise unchanged. ("Cut the deck")
-  targetAreaCol <- which(colnames(leafDataWestStatuses) %in% targetArea)
-  nextColNum <- (targetAreaCol)%%ncol(leafDataWestStatuses)+1
-  lastColNum <- ncol(leafDataWestStatuses)
+  targetAreaCol <- which(colnames(leafDataStatuses) %in% targetArea)
+  nextColNum <- (targetAreaCol)%%ncol(leafDataStatuses)+1
+  lastColNum <- ncol(leafDataStatuses)
   if (targetAreaCol != lastColNum) {
-    leafDataWestStatuses <- leafDataWestStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
+    leafDataStatuses <- leafDataStatuses[,c(nextColNum:lastColNum,1:targetAreaCol)]
   }
 
   # Find column number of last "Current" status
   rightmostCurrentCol <- function(x) {
-    tail(colnames(leafDataWestStatuses)[x=="Current"],1)
+    tail(colnames(leafDataStatuses)[x=="Current"],1)
   }
-  rightmostCurrentColName <- apply(leafDataWestStatuses,1,rightmostCurrentCol)
-  nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataWestStatuses))
+  rightmostCurrentColName <- apply(leafDataStatuses,1,rightmostCurrentCol)
+  nColsFromCurrent <- lastColNum-match(rightmostCurrentColName,colnames(leafDataStatuses))
 
-  # Find column number of first "Next" status, for use in case of "Recently Done"
+  # In case nColsFromCurrent is low, but the area is "Recently Done",
+  #  replace the nColsFromCurrent value with nColsFromFurthest-"Done"-or-"Next".
+  #  (In essense, "Recently Done" areas can sometimes have misleadingly low
+  #  values of nColsFromCurrent when pickups are done slightly out of sequence.
+  #  Accuracy isn't crucial in this situation, as pickup was "Recently Done",
+  #  so it's sufficient to replace the number with something larger.)
   leftmostDoneOrNextCol <- function(x) {
-    head(colnames(leafDataWestStatuses)[x=="Next" | x=="Done"],1)
+    head(colnames(leafDataStatuses)[x=="Next" | x=="Done"],1)
   }
-  leftmostDoneOrNextColName <- apply(leafDataWestStatuses,1,leftmostDoneOrNextCol)
-  nColsReplacementValue <- ncol(leafDataWestStatuses)-match(leftmostDoneOrNextColName,colnames(leafDataWestStatuses))
-  nColsFromCurrent <- ifelse(nColsFromCurrent < 30 & leafDataWestStatuses[,targetArea]=="Recently Done", 
+  leftmostDoneOrNextColName <- apply(leafDataStatuses,1,leftmostDoneOrNextCol)
+  nColsReplacementValue <- ncol(leafDataStatuses)-match(leftmostDoneOrNextColName,colnames(leafDataStatuses))
+  nColsFromCurrent <- ifelse(nColsFromCurrent < 30 & leafDataStatuses[,targetArea]=="Recently Done", 
                              nColsReplacementValue,
                              nColsFromCurrent)
 
   # Mask out data from after last pickup of the year
   #  (nDaysTilPickup is not a meaningful number here)
-  afterLastPickup <- rcumsum(as.numeric(leafDataWestStatuses[,targetArea]=="Current"))==0
+  afterLastPickup <- rcumsum(as.numeric(leafDataStatuses[,targetArea]=="Current"))==0
+  # Any time nDaysTilPickup exceeds 50, it's not actually meaningful
+  afterLastPickup <- afterLastPickup | nDaysTilPickup > 50
+  afterLastPickup <- afterLastPickup | is.na(leafDataStatuses[,targetArea])
   nDaysTilPickup <- nDaysTilPickup[!afterLastPickup]
   nColsFromCurrent <- nColsFromCurrent[!afterLastPickup]
   timeStamp      <- timeStamp[!afterLastPickup]
@@ -214,60 +233,61 @@ generateModelData <- function(leafDataWest,targetArea) {
   # Build a data.frame with independent & dependent variables
   modelData <- data.frame(nDaysTilPickup,nColsFromCurrent)
 
-  modelData$status <- factor(leafDataWestStatuses[!afterLastPickup,targetArea],levels=c("Done","Current","Next","Recently Done","Not Done"))
-  modelData$nCurrent <- rowSums(leafDataWestStatuses[!afterLastPickup,]=="Current")
+  modelData$status <- factor(leafDataStatuses[!afterLastPickup,targetArea],levels=c("Done","Current","Next","Recently Done","Not Done"))
+  modelData$nCurrent <- rowSums(leafDataStatuses[!afterLastPickup,]=="Current")
   modelData$timeStamps <- timeStamp
-  modelData$weekOfYear <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%W")
+  modelData$weekOfYear <- factor(format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%W"))
   modelData$month <- format(as.Date(modelData$timeStamps,format="%d-%m-%Y"),"%m")
   
   # Count how long each run of consecutive "Current"s is.
-  currentsInTargetArea <- leafDataWestStatuses[!afterLastPickup,targetArea]=="Current"
+  currentsInTargetArea <- leafDataStatuses[!afterLastPickup,targetArea]=="Current"
   modelData$ageOfCurrentStatus <- currentsInTargetArea * ave(currentsInTargetArea, c(0L, cumsum(diff(currentsInTargetArea) != 0)),FUN = seq_along)
 
   # Allstreaks
-  allStreakLength <- apply(leafDataWestStatuses[!afterLastPickup,]=="Current",2,conseq)+
-                     apply(leafDataWestStatuses[!afterLastPickup,]=="Done",2,conseq)+
-                     apply(leafDataWestStatuses[!afterLastPickup,]=="Next",2,conseq)
+  allStreakLength <- apply(leafDataStatuses[!afterLastPickup,]=="Current",2,conseq)+
+                     apply(leafDataStatuses[!afterLastPickup,]=="Done",2,conseq)+
+                     apply(leafDataStatuses[!afterLastPickup,]=="Next",2,conseq)
   modelData$ageOfStatus <- allStreakLength[,targetArea]
   modelData$ageOfStatusSquared <- (modelData$ageOfStatus)^2
   modelData$ageOfStatusGT10 <- modelData$ageOfStatus>10
     
   modelData
 }
+```
 
+```{r buildWestPredictor, message=FALSE,warning=FALSE}
 # Select only the columns for Area Statuses
 leafDataWestStatuses <- leafDataWest %>%
   select(matches("Area[0-9]+_[0-9]+$"))
 
 # Run our function for each Area, appending it to a 
 # master data.frame, "modelData"
-modelData <- data.frame()
+modelDataWest <- data.frame()
 for (area in colnames(leafDataWestStatuses)) {
   thisAreaModel <- cbind(Area=area,generateModelData(leafDataWest,area))
-  modelData <- rbind(modelData,thisAreaModel)
+  modelDataWest <- rbind(modelDataWest,thisAreaModel)
 }
+modelDataWest <- modelDataWest[complete.cases(modelDataWest),]
 
 # Build various regressions, cross-validating each with
 # k-fold validation. Choose the best.
 tc <- trainControl("cv",10,savePredictions = TRUE)
 #Proposed fits:
-(fit <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent,data=modelData,method="lm",trControl=tc))
-(fit2 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelData,method="lm",trControl=tc))
-(fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelData,method="lm",trControl=tc))
-# (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelData,method="lm",trControl=tc))
-(fit5 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus,data=modelData,method="lm",trControl=tc))
-(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus + ageOfStatus*ageOfStatus,data=modelData,method="lm",trControl=tc))
-(fit7 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatusGT10,data=modelData,method="lm",trControl=tc))
+(fit <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent,data=modelDataWest,method="lm",trControl=tc))
+(fit2 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelDataWest,method="lm",trControl=tc))
+(fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataWest,method="lm",trControl=tc))
+# (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelDataWest,method="lm",trControl=tc))
+(fit5 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus,data=modelDataWest,method="lm",trControl=tc))
+(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus + ageOfStatus*ageOfStatus,data=modelDataWest,method="lm",trControl=tc))
+(fit7 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatusGT10,data=modelDataWest,method="lm",trControl=tc))
 
-# #fit3 is best
-# selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelData)
-#fit6 is best
-selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatusGT10,data=modelData)
+#fit5 is best
+selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus,data=modelDataWest)
 
-dataForPlots <- data.frame(modelData,fitted=selectedFit$fitted.values,residuals=selectedFit$residuals)
+dataForPlots <- data.frame(modelDataWest,fitted=selectedFit$fitted.values,residuals=selectedFit$residuals)
 # }
 
-saveRDS(selectedFit, "modelBrush.rds", ascii=TRUE)
+saveRDS(selectedFit, "modelWestBrush.rds", ascii=TRUE)
 ```
 
 ```{r somePlots, message=FALSE,warning=FALSE}
@@ -294,7 +314,71 @@ ggplot(data=dataForPlots) + geom_abline(aes(slope=1,intercept=0)) + geom_jitter(
 
 ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=ageOfStatus,colour=fitted),size=2,alpha=0.7)
 
-ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=status),size=2,alpha=0.7)
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=status),size=2,alpha=0.1)
 
-ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=ageOfStatus),size=2,alpha=0.7)
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=ageOfStatus),size=2,alpha=0.1)
+```
+
+```{r buildEastPredictor, message=FALSE,warning=FALSE}
+# Select only the columns for Area Statuses
+leafDataEastStatuses <- leafDataEast %>%
+  select(matches("Area[0-9]+_[0-9]+$"))
+
+# Run our function for each Area, appending it to a 
+# master data.frame, "modelData"
+modelDataEast <- data.frame()
+for (area in colnames(leafDataEastStatuses)) {
+  thisAreaModel <- cbind(Area=area,generateModelData(leafDataEast,area))
+  modelDataEast <- rbind(modelDataEast,thisAreaModel)
+}
+modelDataEast <- modelDataEast[complete.cases(modelDataEast),]
+
+# Build various regressions, cross-validating each with
+# k-fold validation. Choose the best.
+tc <- trainControl("cv",10,savePredictions = TRUE)
+#Proposed fits:
+(fit <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent,data=modelDataEast,method="lm",trControl=tc))
+(fit2 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status,data=modelDataEast,method="lm",trControl=tc))
+(fit3 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area,data=modelDataEast,method="lm",trControl=tc))
+# (fit4 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + Area*status,data=modelDataEast,method="lm",trControl=tc))
+(fit5 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus,data=modelDataEast,method="lm",trControl=tc))
+(fit6 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus + ageOfStatus*ageOfStatus,data=modelDataEast,method="lm",trControl=tc))
+(fit7 <- train(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatusGT10,data=modelDataEast,method="lm",trControl=tc))
+
+#fit5 is best
+selectedFit <- lm(nDaysTilPickup ~ nColsFromCurrent + status + nCurrent + status*nCurrent + nColsFromCurrent*status + Area + ageOfStatus,data=modelDataEast)
+
+dataForPlots <- data.frame(modelDataEast,fitted=selectedFit$fitted.values,residuals=selectedFit$residuals)
+# }
+
+saveRDS(selectedFit, "modelEastBrush.rds", ascii=TRUE)
+```
+
+```{r someMorePlots, message=FALSE,warning=FALSE}
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=month),size=4,alpha=0.6)
+
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=weekOfYear),size=4)
+
+# fitted.values vs nDaysTilPickup for specific area
+targetArea="Area07_018"
+targetArea="Area09_002"
+ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_abline(aes(slope=1,intercept=0)) + geom_point(aes(x=nDaysTilPickup,y=fitted,colour=status),size=3)
+
+targetArea="Area07_018"
+ggplot(data=dataForPlots[dataForPlots$Area==targetArea,]) + geom_point(aes(x=nDaysTilPickup,y=nColsFromCurrent,colour=status),size=3,alpha=0.3)
+
+ggplot(data=dataForPlots[abs(dataForPlots$nDaysTilPickup-dataForPlots$fitted)>5 & dataForPlots$status != "Current",]) + geom_point(aes(x=nDaysTilPickup,y=nColsFromCurrent,colour=status),size=3,alpha=0.3)+ geom_abline(aes(slope=(1/0.119473),intercept=-1.480688))
+
+ggplot(data=dataForPlots) + geom_jitter(aes(x=ageOfCurrentStatus,y=residuals,colour=status),size=2,alpha=0.7)
+
+# residuals vs nDaysTilPickup for all areas
+ggplot(data=dataForPlots) + geom_abline(aes(slope=1,intercept=0)) + geom_point(aes(x=nDaysTilPickup,y=fitted,colour=status),size=2,alpha=0.7)
+
+ggplot(data=dataForPlots) + geom_abline(aes(slope=1,intercept=0)) + geom_jitter(aes(x=nDaysTilPickup,y=fitted,colour=ageOfStatus),size=2,alpha=0.7)
+
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=ageOfStatus,colour=fitted),size=2,alpha=0.7)
+
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=status),size=2,alpha=0.1)
+
+ggplot(data=dataForPlots) + geom_jitter(aes(x=nDaysTilPickup,y=residuals,colour=ageOfStatus),size=2,alpha=0.1)
 ```
