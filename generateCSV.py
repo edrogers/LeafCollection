@@ -51,10 +51,10 @@ for mapPDF in mapPDFs :
         areaColor=mapRGB.getpixel((area[0],area[1]))
         #Find the district status color with the smallest RMS distance
         # to this areaColor in RGB space
-        ndDist = sum([math.sqrt((x-y)*(x-y)) for x,y in zip(nd_color,areaColor)])
-        dnDist = sum([math.sqrt((x-y)*(x-y)) for x,y in zip(dn_color,areaColor)])
-        crDist = sum([math.sqrt((x-y)*(x-y)) for x,y in zip(cr_color,areaColor)])
-        nxDist = sum([math.sqrt((x-y)*(x-y)) for x,y in zip(nx_color,areaColor)])
+        ndDist = math.sqrt(sum([((x-y)*(x-y)) for x,y in zip(nd_color,areaColor)]))
+        dnDist = math.sqrt(sum([((x-y)*(x-y)) for x,y in zip(dn_color,areaColor)]))
+        crDist = math.sqrt(sum([((x-y)*(x-y)) for x,y in zip(cr_color,areaColor)]))
+        nxDist = math.sqrt(sum([((x-y)*(x-y)) for x,y in zip(nx_color,areaColor)]))
         distList = [ndDist, dnDist, crDist, nxDist]
         areaStatus = Status[distList.index(min(distList))]
         with open(csvOutputFilename,'a') as csvOutputFile :
