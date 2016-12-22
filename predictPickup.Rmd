@@ -68,10 +68,14 @@ leafData[currentStreakLength>3] <- "Done"
 # rows in the data.frame can be computed.
 madisonHolidays <- c(holidayNYSE(2015),
                      holidayNYSE(2016),
+                     holidayNYSE(2017),                     
                      timeDate("2015-11-27 05:00:00",
                               format="%Y-%m-%d %H:%M:%S",
                               FinCenter = "NewYork"),
                      timeDate("2016-11-25 05:00:00",
+                              format="%Y-%m-%d %H:%M:%S",
+                              FinCenter = "NewYork"),
+                     timeDate("2017-11-24 05:00:00",
                               format="%Y-%m-%d %H:%M:%S",
                               FinCenter = "NewYork"))
 cal <- Calendar(madisonHolidays,weekdays = c("saturday","sunday"))
@@ -91,12 +95,12 @@ leafDataCollectionRoundNames <- names(leafData)
 leafDataCollectionRoundNames <- setNames(leafDataCollectionRoundNames,paste0("collectionRound_",leafDataAreaNames))
 #  Then, fill these columns with a unique number for each round
 #  of collections. This is done by finding each time the status
-#  is not equal to "Current", but followed by a "Current" in the
-#  next row.  Each time this happens a row is marked true. Then,
-#  a cumsum is taken over that column, which gives a column that
-#  is iterated if-and-only-if a new "Current" status occurs.
+#  is not equal to "Current", but immediately follows a "Current".
+#  Each time this happens a row is marked true. Then, a cumsum is 
+#  taken over that column, which gives a column that
+#  is iterated if-and-only-if a "Current" status expires.
 leafData <- leafData %>% 
-            mutate_each_(funs(cumsum((. != "Current") * (head(c("Current",.),-1) == "Current"))),leafDataCollectionRoundNames) 
+            mutate_each_(funs(cumsum(as.numeric(. != "Current") * as.numeric(head(c("Done",.),-1) == "Current"))),leafDataCollectionRoundNames) 
 
 
 # Add a column of nBusinessDaysTilPickup for each Area
@@ -109,12 +113,13 @@ leafDataNDaysNames <- setNames(leafDataNDaysNames,paste0("NDaysTilCollection_",l
 leafData$BusinessDaysTilNextEntry <- c(dates[,"bizDiff"],0)
 
 #  Next, use mutate_each() to copy the nBizDays column once for
-#  each area, but zero-ing out the value if the area is "Current"
+#  each area, but zero-ing out the value if the area is "Current",
+#  but not followed by a "Current" in the next row.
 #   (A dummy function must be used in addition just to get 
 #   mutate_each to behave. This set of columns, "..._sd" is
 #   immediately discarded)
 leafData <- leafData %>%
-              mutate_each(funs(nBusinessDaysTilPickup=(as.numeric(. != "Current")*BusinessDaysTilNextEntry),sd=is.na),starts_with("Area"))
+              mutate_each(funs(nBusinessDaysTilPickup=(as.numeric(!((leafData$Area10_001 == "Current") & (tail(c(leafData$Area10_001,"Current"),-1) != "Current")))*BusinessDaysTilNextEntry),sd=is.na),starts_with("Area"))
 leafData <- leafData %>%
   select(-contains("_sd"))
 
